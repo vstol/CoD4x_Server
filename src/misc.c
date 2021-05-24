@@ -35,85 +35,6 @@
 #include <stdarg.h>
 #include <ctype.h>
 
-typedef struct
-{
-    short word_0;
-    byte byte_2;
-    byte numbytes;
-    byte datastart;
-}slHeader_t;
-
-typedef union
-{
-    slHeader_t header;
-    char data[12];
-}slTree_t;
-
-char* SL_ConvertToString(unsigned int location)
-{
-    char* string;
-
-    slTree_t** ptr = (slTree_t**)STRBUFFBASEPTR_ADDR;
-    slTree_t* base = *ptr;
-    string = (char*)&base[location].header.datastart;
-    return string;
-}
-
-
-unsigned int SL_GetString(const char *string, int type)
-{
-	int memlen = strlen(string) + 1;
-	return SL_GetStringOfSize(string, type, memlen);
-}
-
-
-unsigned int SL_GetLowercaseString(const char *upperstring, int type)
-{
-	unsigned int size;
-	char lwrstr[8192];
-	int i;
-
-	size = strlen(upperstring) + 1;
-	
-	if ( (signed int)size >= sizeof(lwrstr) )
-	{
-		Com_Error(2, "SL_GetLowercaseString(): max string length exceeded: \"%s\"", upperstring);
-		return 0;
-	}
-  
-	for(i = 0; i < size; ++i)
-	{
-		lwrstr[i] = tolower(upperstring[i]);
-	}
-    return SL_GetStringOfSize(lwrstr, type, size);
-}
-
-
-unsigned int SL_FindLowercaseString(const char *upperstring)
-{
-	unsigned int size;
-	char lwrstr[8192];
-	int i;
-
-	size = strlen(upperstring) + 1;
-	
-	if ( (signed int)size >= sizeof(lwrstr) )
-	{
-		return 0;
-	}
-  
-	for(i = 0; i < size; ++i)
-	{
-		lwrstr[i] = tolower(upperstring[i]);
-	}
-    return FindStringOfSize(lwrstr, size);
-}
-
-int SL_FindString(const char *string)
-{
-  return FindStringOfSize(string, strlen(string) + 1);
-}
-
 void AddRedirectLocations()
 {
 /*
@@ -133,10 +54,9 @@ void AddRedirectLocations()
 
 qboolean __cdecl Com_LoadDvarsFromBuffer(const char **inputbuf, unsigned int length, const char *data_p, const char *filename)
 {
-    const char *cvar_name;
+    struct parseInfo_t *cvar_name, *line;
     int i, count;
     char buf[16384];
-    const char* line;
 
     Com_Memset(buf, 0, sizeof(buf));
 
@@ -147,31 +67,31 @@ qboolean __cdecl Com_LoadDvarsFromBuffer(const char **inputbuf, unsigned int len
 	Com_BeginParseSession(filename);
 	count = 0;
 
-	while ( (cvar_name = Com_Parse(&data_p)) && cvar_name[0])
+	while ( (cvar_name = Com_Parse(&data_p)) && cvar_name->token[0])
 	{
 		for(i = 0; i < length; i++)
 		{
-			if(!Q_stricmp(cvar_name, inputbuf[i]))
+			if(!Q_stricmp(cvar_name->token, inputbuf[i]))
 				break;
 		}
 		if(i == length)
 		{
 			if(com_developer && com_developer->integer)
 			{
-				Com_PrintWarning("WARNING: unknown cvar '%s' in file '%s'\n", cvar_name, filename);
+				Com_PrintWarning(CON_CHANNEL_CVAR,"WARNING: unknown cvar '%s' in file '%s'\n", cvar_name->token, filename);
 			}
 			Com_SkipRestOfLine(&data_p);
 		}else{
 			line = Com_ParseOnLine(&data_p);
 			if(com_developer && com_developer->integer)
 			{
-				Cvar_Set(inputbuf[i], line);
+				Cvar_Set(inputbuf[i], line->token);
 			}else{
-				if((!Q_strncmp(inputbuf[i],"bg_shock_viewKickPeriod", 23) || !Q_strncmp(inputbuf[i],"bg_shock_viewKickFadeTime", 25)) && (line[0] == '0' && line[1] == '\0'))
+				if((!Q_strncmp(inputbuf[i],"bg_shock_viewKickPeriod", 23) || !Q_strncmp(inputbuf[i],"bg_shock_viewKickFadeTime", 25)) && (line->token[0] == '0' && line->token[1] == '\0'))
 				{
 					/* Quite this spam */
 				}else{
-					Cvar_Set(inputbuf[i], line);
+					Cvar_Set(inputbuf[i], line->token);
 				}
 			}
 			if ( !buf[i] )
@@ -189,7 +109,7 @@ qboolean __cdecl Com_LoadDvarsFromBuffer(const char **inputbuf, unsigned int len
 		return 1;
 	}
 
-	Com_PrintError("ERROR: the following cvars were not specified in file '%s'\n", filename);
+	Com_PrintError(CON_CHANNEL_CVAR,"ERROR: the following cvars were not specified in file '%s'\n", filename);
 	for(i = 0; i < length; i++)
 	{
 		while ( buf[i] && i < length )
@@ -197,7 +117,7 @@ qboolean __cdecl Com_LoadDvarsFromBuffer(const char **inputbuf, unsigned int len
 			++i;
 		}
 		if(i < length)
-			Com_PrintError("  %s\n", inputbuf[i]);
+			Com_PrintError(CON_CHANNEL_CVAR,"  %s\n", inputbuf[i]);
 	}
 	return 0;
 }
@@ -230,9 +150,9 @@ void dMessage (int num, const char *msg, ...)
 
   if(num)
   {
-    Com_PrintError("\nODE Message %d: %s\n", num, buf);
+    Com_PrintError(CON_CHANNEL_PHYS,"\nODE Message %d: %s\n", num, buf);
   }else{
-    Com_PrintError("\nODE Message: %s\n", buf);
+    Com_PrintError(CON_CHANNEL_PHYS,"\nODE Message: %s\n", buf);
   }
 }
 

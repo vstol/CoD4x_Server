@@ -25,41 +25,13 @@
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
+#define __QSHARED_C__
 #include "q_shared.h"
 #include "qcommon_io.h"
+#include "sys_thread.h"
+#include "misc.h"
+#include "null_client.h"
 
-
-short   ShortSwap (short l)
-{
-	byte    b1,b2;
-
-	b1 = l&255;
-	b2 = (l>>8)&255;
-
-	return (b1<<8) + b2;
-}
-
-short	ShortNoSwap (short l)
-{
-	return l;
-}
-
-int    LongSwap (int l)
-{
-	byte    b1,b2,b3,b4;
-
-	b1 = l&255;
-	b2 = (l>>8)&255;
-	b3 = (l>>16)&255;
-	b4 = (l>>24)&255;
-
-	return ((int)b1<<24) + ((int)b2<<16) + ((int)b3<<8) + b4;
-}
-
-int	LongNoSwap (int l)
-{
-	return l;
-}
 
 int Q_isprint( int c )
 {
@@ -85,6 +57,13 @@ int Q_isupper( int c )
 int Q_isalpha( int c )
 {
 	if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
+		return ( 1 );
+	return ( 0 );
+}
+
+int Q_isalphanum( int c )
+{
+	if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
 		return ( 1 );
 	return ( 0 );
 }
@@ -229,6 +208,49 @@ int Q_stricmp (const char *s1, const char *s2) {
 }
 
 
+int __cdecl Q_stricmpwild(const char *wild, const char *s)
+{
+  char charWild;
+  int delta;
+  char charRef;
+
+  assert( wild );
+  assert( s );
+  do
+  {
+    charWild = *wild++;
+    if ( charWild == '*' )
+    {
+      if ( !*wild )
+      {
+        return 0;
+      }
+      if ( *s && !Q_stricmpwild(wild - 1, s + 1) )
+      {
+        return 0;
+      }
+    }
+    else
+    {
+      charRef = *s++;
+      if ( charWild != charRef && charWild != '?' )
+      {
+        delta = tolower(charWild) - tolower(charRef);
+        if ( delta != 0 )
+        {
+          return 1;
+        }
+      }
+    }
+  }
+  while ( charWild );
+  return 0;
+}
+
+
+
+
+
 char *Q_strlwr( char *s1 ) {
     char	*s;
 
@@ -273,12 +295,12 @@ void Q_bstrcpy(char* dest, const char* src){
 
 
 // never goes past bounds or leaves without a terminating 0
-void Q_strcat( char *dest, int size, const char *src ) {
+void Q_strncat( char *dest, int size, const char *src ) {
 	int		l1;
 
 	l1 = strlen( dest );
 	if ( l1 >= size ) {
-		Com_Error( ERR_FATAL, "Q_strcat: already overflowed" );
+		Com_Error( ERR_FATAL, "Q_strncat: already overflowed" );
 	}
 	Q_strncpyz( dest + l1, src, size - l1 );
 }
@@ -464,9 +486,36 @@ int QDECL Com_sprintf(char *dest, int size, const char *fmt, ...)
 	va_end (argptr);
 
 	if(len >= size)
-		Com_Printf("Com_sprintf: Output length %d too short, require %d bytes.\n", size, len + 1);
+		Com_Printf(CON_CHANNEL_SYSTEM,"Com_sprintf: Output length %d too short, require %d bytes.\n", size, len + 1);
 
 	return len;
+}
+
+int Com_sprintfPos(char *dest, const int destSize, int *destPos, const char *fmt, ...)
+{
+  char *destMod;
+  int destModSize;
+  int len;
+  va_list va;
+
+  va_start(va, fmt);
+  if ( *destPos < destSize - 1 )
+  {
+    destMod = &dest[*destPos];
+    destModSize = destSize - *destPos;
+    len = Q_vsnprintf(destMod, destSize - *destPos, fmt, va);
+    destMod[destModSize - 1] = 0;
+    if ( len != destModSize && len != -1 )
+    {
+      *destPos += len;
+    }
+    else
+    {
+      *destPos = destSize - 1;
+    }
+    return len;
+  }
+  return -1;
 }
 
 
@@ -494,7 +543,7 @@ char* QDECL va_replacement(char *dest, int size, const char *fmt, ...)
 	va_end (argptr);
 
 	if(len >= size)
-		Com_Printf("Com_sprintf: Output length %d too short, require %d bytes.\n", size, len + 1);
+		Com_Printf(CON_CHANNEL_SYSTEM,"Com_sprintf: Output length %d too short, require %d bytes.\n", size, len + 1);
 
 	return dest;
 }
@@ -516,8 +565,8 @@ void Com_TruncateLongString( char *buffer, const char *s )
 	else
 	{
 		Q_strncpyz( buffer, s, ( TRUNCATE_LENGTH / 2 ) - 3 );
-		Q_strcat( buffer, TRUNCATE_LENGTH, " ... " );
-		Q_strcat( buffer, TRUNCATE_LENGTH, s + length - ( TRUNCATE_LENGTH / 2 ) + 3 );
+		Q_strncat( buffer, TRUNCATE_LENGTH, " ... " );
+		Q_strncat( buffer, TRUNCATE_LENGTH, s + length - ( TRUNCATE_LENGTH / 2 ) + 3 );
 	}
 }
 
@@ -560,68 +609,12 @@ Info_RemoveKey
 */
 void Info_RemoveKey( char *s, const char *key ) {
 	char	*start;
-	char	pkey[MAX_INFO_KEY];
-	char	value[MAX_INFO_VALUE];
-	char	*o;
-
-	if ( strlen( s ) >= MAX_INFO_STRING ) {
-		Com_Printf(  "Error: Info_RemoveKey: oversize infostring" );
-	}
-
-	if (strchr (key, '\\')) {
-		return;
-	}
-
-	while (1)
-	{
-		start = s;
-		if (*s == '\\')
-			s++;
-		o = pkey;
-		while (*s != '\\')
-		{
-			if (!*s)
-				return;
-			*o++ = *s++;
-		}
-		*o = 0;
-		s++;
-
-		o = value;
-		while (*s != '\\' && *s)
-		{
-			if (!*s)
-				return;
-			*o++ = *s++;
-		}
-		*o = 0;
-
-		if (!strcmp (key, pkey) )
-		{
-			Q_bstrcpy(start, s);	// remove this part - Bugfix using Q_bstrcpy() instaed strcpy()
-			return;
-		}
-
-		if (!*s)
-			return;
-	}
-
-}
-
-
-/*
-===================
-BigInfo_RemoveKey
-===================
-*/
-void BigInfo_RemoveKey( char *s, const char *key ) {
-	char	*start;
 	char	pkey[BIG_INFO_KEY];
 	char	value[BIG_INFO_VALUE];
 	char	*o;
 
 	if ( strlen( s ) >= BIG_INFO_STRING ) {
-		Com_Printf(  "Error: BigInfo_RemoveKey: oversize infostring" );
+		Com_Printf(CON_CHANNEL_SYSTEM,  "Error: Info_RemoveKey: oversize infostring\n" );
 	}
 
 	if (strchr (key, '\\')) {
@@ -663,6 +656,7 @@ void BigInfo_RemoveKey( char *s, const char *key ) {
 	}
 
 }
+
 
 
 /*
@@ -676,17 +670,13 @@ FIXME: overflow check?
 */
 char *Info_ValueForKey( const char *s, const char *key ) {
 	char	pkey[BIG_INFO_KEY];
-	static	char value[2][BIG_INFO_VALUE];	// use two buffers so compares
+	static	char value[2][MAX_INFO_VALUE];	// use two buffers so compares
 						// work without stomping on each other
 	static	int	valueindex = 0;
 	char	*o;
 
 	if ( !s || !key ) {
 		return "";
-	}
-
-	if ( strlen( s ) >= BIG_INFO_STRING ) {
-		Com_Printf(  "Error: Info_ValueForKey: oversize infostring" );
 	}
 
 	valueindex ^= 1;
@@ -699,7 +689,14 @@ char *Info_ValueForKey( const char *s, const char *key ) {
 		{
 			if (!*s)
 				return "";
+
 			*o++ = *s++;
+
+			if(o +1 >= pkey + sizeof(pkey))
+			{
+				Com_Printf(CON_CHANNEL_SYSTEM,  "Error: Info_ValueForKey: oversize key in infostring\n" );
+				return "";
+			}
 		}
 		*o = 0;
 		s++;
@@ -709,6 +706,12 @@ char *Info_ValueForKey( const char *s, const char *key ) {
 		while (*s != '\\' && *s)
 		{
 			*o++ = *s++;
+
+			if(o +1 >= value[valueindex] + sizeof(value[0]))
+			{
+				Com_Printf(CON_CHANNEL_SYSTEM,  "Error: Info_ValueForKey: oversize key in infostring\n" );
+				return "";
+			}
 		}
 		*o = 0;
 
@@ -735,47 +738,47 @@ void Info_SetValueForKey( char *s, const char *key, const char *value ) {
 	char	newi[MAX_INFO_STRING];
 
 	if ( strlen( s ) >= MAX_INFO_STRING ) {
-		Com_PrintWarning("Unexpected error - Info_SetValueForKey: oversize infostring" );
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Unexpected error - Info_SetValueForKey: oversize infostring\n" );
 	}
 
 	if (strchr (key, '\\'))
 	{
-		Com_PrintWarning ("Can't use keys with a \\\n");
-		Com_DPrintf("Bad key: %s value: %s\n", key, value);
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use keys with a \\\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad key: %s value: %s\n", key, value);
 		return;
 	}
 
 	if (strchr (value, '\\'))
 	{
-		Com_PrintWarning ("Can't use values with a \\\n");
-		Com_DPrintf("Bad value: %s key: %s\n", value, key);
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use values with a \\\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad value: %s key: %s\n", value, key);
 		return;
 	}
 
 	if (strchr (key, ';'))
 	{
-		Com_PrintWarning ("Can't use keys with a semicolon\n");
-		Com_DPrintf("Bad key: %s value: %s\n", key, value);
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use keys with a semicolon\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad key: %s value: %s\n", key, value);
 		return;
 	}
 
 	if (strchr (value, ';'))
 	{
-		Com_PrintWarning ("Can't use values with a semicolon\n");
-		Com_DPrintf("Bad value: %s key: %s\n", value, key);
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use values with a semicolon\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad value: %s key: %s\n", value, key);
 		return;
 	}
 
 	if (strchr (key, '\"'))
 	{
-		Com_PrintWarning ("Can't use keys with a \"\n");
-		Com_DPrintf("Bad key: %s value: %s\n", key, value);
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use keys with a \"\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad key: %s value: %s\n", key, value);
 		return;
 	}
 	if (strchr (value, '\"'))
 	{
-		Com_PrintWarning ("Can't use values with a \"\n");
-		Com_DPrintf("Bad value: %s key: %s\n", value, key);
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use values with a \"\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad value: %s key: %s\n", value, key);
 		return;
 	}
 
@@ -788,7 +791,7 @@ void Info_SetValueForKey( char *s, const char *key, const char *value ) {
 
 	if (strlen(newi) + strlen(s) > MAX_INFO_STRING)
 	{
-		Com_PrintWarning ("Info string length exceeded\n");
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Info string length exceeded\n");
 		return;
 	}
 
@@ -797,39 +800,57 @@ void Info_SetValueForKey( char *s, const char *key, const char *value ) {
 }
 
 
-/*
-==================
-Info_SetValueForKey
 
-Changes or adds a key/value pair
-==================
-*/
 void BigInfo_SetValueForKey( char *s, const char *key, const char *value ) {
 	char	newi[BIG_INFO_STRING];
 
 	if ( strlen( s ) >= BIG_INFO_STRING ) {
-		Com_Printf(  "Error: Info_SetValueForKey: oversize infostring" );
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Unexpected error - Info_SetValueForKey: oversize infostring\n" );
 	}
 
-	if (strchr (key, '\\') || strchr (value, '\\'))
+	if (strchr (key, '\\'))
 	{
-		Com_Printf("Error: Can't use keys or values with a \\\n");
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use keys with a \\\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad key: %s value: %s\n", key, value);
 		return;
 	}
 
-	if (strchr (key, ';') || strchr (value, ';'))
+	if (strchr (value, '\\'))
 	{
-		Com_Printf("Error: Can't use keys or values with a semicolon\n");
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use values with a \\\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad value: %s key: %s\n", value, key);
 		return;
 	}
 
-	if (strchr (key, '\"') || strchr (value, '\"'))
+	if (strchr (key, ';'))
 	{
-		Com_Printf("Error: Can't use keys or values with a \"\n");
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use keys with a semicolon\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad key: %s value: %s\n", key, value);
 		return;
 	}
 
-	BigInfo_RemoveKey (s, key);
+	if (strchr (value, ';'))
+	{
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use values with a semicolon\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad value: %s key: %s\n", value, key);
+		return;
+	}
+
+	if (strchr (key, '\"'))
+	{
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use keys with a \"\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad key: %s value: %s\n", key, value);
+		return;
+	}
+	if (strchr (value, '\"'))
+	{
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Can't use values with a \"\n");
+		Com_DPrintf(CON_CHANNEL_SYSTEM,"Bad value: %s key: %s\n", value, key);
+		return;
+	}
+
+
+	Info_RemoveKey (s, key);
 	if (!value || !strlen(value))
 		return;
 
@@ -837,13 +858,14 @@ void BigInfo_SetValueForKey( char *s, const char *key, const char *value ) {
 
 	if (strlen(newi) + strlen(s) > BIG_INFO_STRING)
 	{
-		Com_Printf( "Error: Info string length exceeded\n");
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"Info string length exceeded\n");
 		return;
 	}
 
 	strcat (newi, s);
 	strcpy (s, newi);
 }
+
 
 
 void Info_Print( const char *s ) {
@@ -868,11 +890,11 @@ void Info_Print( const char *s ) {
 		}
 		else
 			*o = 0;
-		Com_Printf ("%s ", key);
+		Com_Printf(CON_CHANNEL_SYSTEM,"%s ", key);
 
 		if (!*s)
 		{
-			Com_Printf ("MISSING VALUE\n");
+			Com_Printf(CON_CHANNEL_SYSTEM,"MISSING VALUE\n");
 			return;
 		}
 
@@ -884,7 +906,7 @@ void Info_Print( const char *s ) {
 
 		if (*s)
 			s++;
-		Com_Printf ("%s\n", value);
+		Com_Printf(CON_CHANNEL_SYSTEM,"%s\n", value);
 	}
 }
 
@@ -967,7 +989,7 @@ int Info_Decode(const char* inurl, char* outdecodedurl, int buflen)
 	return i;
 }
 
-void BigInfo_SetEncodedValueForKey( char *s, const char *key, const char *value, int len )
+void Info_SetEncodedValueForKey( char *s, const char *key, const char *value, int len )
 {
     char codedvalue[BIG_INFO_STRING];
 
@@ -976,7 +998,7 @@ void BigInfo_SetEncodedValueForKey( char *s, const char *key, const char *value,
     BigInfo_SetValueForKey( s, key, codedvalue );
 }
 
-int BigInfo_DecodedValueForKey( const char *s, const char *key, char *out, int outbuflen)
+int Info_DecodedValueForKey( const char *s, const char *key, char *out, int outbuflen)
 {
     const char* value;
 
@@ -1197,7 +1219,7 @@ void XML_AppendToBuffer( xml_t *base, const char* s )
 
     if(len + base->bufposition + 1 >= base->buffersize )
     {
-        Com_Printf(  "Error: XML_AppendToBuffer: Overflow!\n" );
+        Com_Printf(CON_CHANNEL_SYSTEM,  "Error: XML_AppendToBuffer: Overflow!\n" );
         return;
     }
     Com_Memcpy(base->buffer + base->bufposition, s, len);
@@ -1225,7 +1247,7 @@ void XML_Init( xml_t *base, char *s, int size, char* encoding) {
 	base->encoding = encoding;
 	stack_init(base->stack,sizeof(base->stack));
 	if ( 256 > size ) {
-		Com_Printf(  "Error: XML_Init: too small infostring" );
+		Com_Printf(CON_CHANNEL_SYSTEM,  "Error: XML_Init: too small infostring" );
 	}
 	Com_sprintf(version, sizeof(version), "<?xml version=\"1.0\" encoding=\"%s\"?>\n\0", base->encoding);
 	XML_AppendToBuffer( base, version );
@@ -1295,7 +1317,7 @@ qboolean QDECL XML_OpenTag( xml_t *base, char* root, int count,... ) {
 	buffer[0] = 0;
 	if(base->parents*6 +1 >= sizeof(smallbuff))
 	{
-		Com_Printf("^3Warning: XML_OpenTag would overflow. Too many open tags\n");
+		Com_Printf(CON_CHANNEL_SYSTEM,"^3Warning: XML_OpenTag would overflow. Too many open tags\n");
 		return qfalse;
 	}
 	Com_Memset(&smallbuff[1],' ',base->parents*6);
@@ -1305,7 +1327,7 @@ qboolean QDECL XML_OpenTag( xml_t *base, char* root, int count,... ) {
 	Com_sprintf(buffer,sizeof(buffer),"<%s",root);
 
 	if(!stack_push(base->stack,sizeof(base->stack), base->buffer + base->bufposition + 1)){
-		Com_Printf("^3Warning: XML_OpenTag called without prior initialization\n");
+		Com_Printf(CON_CHANNEL_SYSTEM,"^3Warning: XML_OpenTag called without prior initialization\n");
 		return qfalse;
 	}
 
@@ -1346,15 +1368,15 @@ void XML_CloseTag(xml_t *base) {
 
 	if(base->parents == 0)
 	{
-		Com_PrintError("XML_CloseTag: Invalid close attempt in XML. Attempt to close more elements than you have opened.\n");
-		Com_Printf("Printing up to 960 recent characters of XML as debug:\n");
+		Com_PrintError(CON_CHANNEL_SYSTEM,"XML_CloseTag: Invalid close attempt in XML. Attempt to close more elements than you have opened.\n");
+		Com_Printf(CON_CHANNEL_SYSTEM,"Printing up to 960 recent characters of XML as debug:\n");
 		if(base->bufposition > 960)
 		{
-			Com_Printf("%s\n", &base->buffer[base->bufposition -960]);
+			Com_Printf(CON_CHANNEL_SYSTEM,"%s\n", &base->buffer[base->bufposition -960]);
 		}else{
-			Com_Printf("%s\n", base->buffer);
+			Com_Printf(CON_CHANNEL_SYSTEM,"%s\n", base->buffer);
 		}
-		Com_PrintError("You have errors in your XML code\n");
+		Com_PrintError(CON_CHANNEL_SYSTEM,"You have errors in your XML code\n");
 		return;
 	}
 	base->parents--;
@@ -1705,3 +1727,479 @@ int Q_strLF2CRLF(const char* input, char* output, int outputlimit )
 	output[y] = 0;
 	return y;
 }
+
+
+
+int COM_Compress( char *data_p ) {
+	char *datai, *datao;
+	int c, size;
+
+	size = 0;
+	datai = datao = data_p;
+	if ( datai ) {
+		while ( ( c = *datai ) != 0 ) {
+			if ( c == '\r' || c == '\n' ) {
+				*datao = c;
+				datao++;
+				datai++;
+				size++;
+				// skip double slash comments
+			} else if ( c == '/' && datai[1] == '/' ) {
+				while ( *datai && *datai != '\n' ) {
+					datai++;
+				}
+				// skip /* */ comments
+			} else if ( c == '/' && datai[1] == '*' ) {
+				while ( *datai && ( *datai != '*' || datai[1] != '/' ) )
+				{
+					datai++;
+				}
+				if ( *datai ) {
+					datai += 2;
+				}
+			} else {
+				*datao = c;
+				datao++;
+				datai++;
+				size++;
+			}
+		}
+	}
+	*datao = 0;
+	return size;
+}
+
+void Com_Memset(void* p, byte v, int len)
+{
+    memset(p, v, len);
+}
+
+void Com_Memcpy(void* d, const void* s, int len)
+{
+    memcpy(d, s, len);
+}
+
+
+#ifndef BSPC
+
+char *va(const char *format, ...)
+{
+  struct va_info_t *info;
+  int len;
+  int index;
+  va_list va;
+
+  va_start(va, format);
+  info = Sys_GetValue(1);
+  index = info->index;
+  info->index = (info->index + 1) % MAX_VASTRINGS;
+  len = Q_vsnprintf(info->va_string[index], sizeof(info->va_string[0]), format, va);
+  info->va_string[index][1023] = 0;
+  if ( len < 0 || len >= (unsigned int)sizeof(info->va_string[0]) )
+  {
+    Com_Error(ERR_DROP, "Attempted to overrun string in call to va(): \x27%s\x27", info->va_string[index]);
+  }
+  return info->va_string[index];
+}
+
+#endif
+
+bool __cdecl Com_IsLegacyXModelName(const char *name)
+{
+  return !Q_stricmpn(name, "xmodel", 6) && (name[6] == '/' || name[6] == '\\');
+}
+
+/*
+int __cdecl KeyValueToField(char *pStruct, cspField_t *pField, const char *pszKeyValue, const int iMaxFieldTypes, int (__cdecl *parseSpecialFieldType)(char *, const char *, const int, const int), void (__cdecl *parseStrcpy)(char *, const char *))
+{
+  char name;
+  char dest;
+
+  if ( pField->iFieldType < 15 )
+  {
+    switch ( pField->iFieldType )
+    {
+      case 0:
+        parseStrcpy(&pStruct[pField->iOffset], pszKeyValue);
+        return 1;
+      case 1:
+        Q_strncpyz(&pStruct[pField->iOffset], pszKeyValue, 1024);
+        return 1;
+      case 2:
+        Q_strncpyz(&pStruct[pField->iOffset], pszKeyValue, 64);
+        return 1;
+      case 3:
+        Q_strncpyz(&pStruct[pField->iOffset], pszKeyValue, 256);
+        return 1;
+      case 4:
+        *(uint32_t *)&pStruct[pField->iOffset] = atoi(pszKeyValue);
+        return 1;
+      case 5:
+        pStruct[pField->iOffset] = atoi(pszKeyValue) != 0;
+        return 1;
+      case 6:
+        *(uint32_t *)&pStruct[pField->iOffset] = atoi(pszKeyValue) != 0;
+        return 1;
+      case 7:
+        *(float *)&pStruct[pField->iOffset] = atof(pszKeyValue);
+        return 1;
+      case 8:
+        *(uint32_t *)&pStruct[pField->iOffset] = (signed int)(atof(pszKeyValue) * 1000.0);
+        return 1;
+      case 0xA:
+        Q_strncpyz(&dest, pszKeyValue, 0x2000);
+        *(uint32_t *)&pStruct[pField->iOffset] = R_RegisterModel(&dest);
+        if ( *(uint32_t *)&pStruct[pField->iOffset] )
+        {
+          return 1;
+        }
+        return 0;
+      case 0xB:
+      case 0xC:
+      case 9:
+        return 1;
+      case 0xD:
+        Q_strncpyz(&name, pszKeyValue, 245);
+        *(uint32_t *)&pStruct[pField->iOffset] = PhysPreset_Register(&name);
+        break;
+      case 0xE:
+//        *(uint16_t *)&pStruct[pField->iOffset] = SL_GetLowercaseString(pszKeyValue, 0, 0);
+        *(uint16_t *)&pStruct[pField->iOffset] = SL_GetLowercaseString(pszKeyValue, 0);
+
+        break;
+      default:
+        if ( pField->iFieldType >= 0 )
+        {
+          assertx(0, "ParseConfigStringToStruct is out of sync with the csParseFieldType_t enum list\n");
+        }
+        else
+        {
+          assertx(0, va("Negative field type %i given to ParseConfigStringToStruct\n", pField->iFieldType));
+        }
+        break;
+    }
+    return 1;
+  }
+  if ( iMaxFieldTypes > 0 && pField->iFieldType < iMaxFieldTypes )
+  {
+    assert(parseSpecialFieldType != NULL);
+    if ( !parseSpecialFieldType(pStruct, pszKeyValue, pField->iFieldType, pField->iOffset) )
+    {
+      return 0;
+    }
+    return 1;
+  }
+  assertx(0, va("Bad field type %i\n", pField->iFieldType));
+  Com_Error(ERR_DROP, "Bad field type %i\n", pField->iFieldType);
+  return 0;
+}
+*/
+int __cdecl KeyValueToField(char *pStruct, cspField_t *pField, const char *pszKeyValue, const int iMaxFieldTypes, int (__cdecl *parseSpecialFieldType)(char *, const char *, const int, const int), void (__cdecl *parseStrcpy)(char *, const char *))
+{
+  char dest[0x2000];
+
+  if ( pField->iFieldType <= 11 )
+  {
+    switch ( pField->iFieldType )
+    {
+      case 0:
+        parseStrcpy(&pStruct[pField->iOffset], pszKeyValue);
+        return 1;
+      case 1:
+        Q_strncpyz(&pStruct[pField->iOffset], pszKeyValue, 1024);
+        return 1;
+      case 2:
+        Q_strncpyz(&pStruct[pField->iOffset], pszKeyValue, 64);
+        return 1;
+      case 3:
+        Q_strncpyz(&pStruct[pField->iOffset], pszKeyValue, 256);
+        return 1;
+      case 4:
+        *(uint32_t *)&pStruct[pField->iOffset] = atoi(pszKeyValue);
+        return 1;
+      case 5:
+        *(uint32_t *)&pStruct[pField->iOffset] = atoi(pszKeyValue) != 0;
+        return 1;
+      case 6:
+        *(float *)&pStruct[pField->iOffset] = atof(pszKeyValue);
+        return 1;
+      case 7:
+        *(uint32_t *)&pStruct[pField->iOffset] = (signed int)(atof(pszKeyValue) * 1000.0);
+        return 1;
+      case 8:
+        Q_strncpyz(dest, pszKeyValue, sizeof(dest));
+        *(uint32_t *)&pStruct[pField->iOffset] = (uint32_t)FX_Register(dest);
+        return 1;
+      case 9:
+        Q_strncpyz(dest, pszKeyValue, sizeof(dest));
+        *(uint32_t *)&pStruct[pField->iOffset] = (uint32_t)R_RegisterModel(dest);
+        if ( *(uint32_t *)&pStruct[pField->iOffset] )
+        {
+          return 1;
+        }
+        return 0;
+      case 10:
+        Q_strncpyz(dest, pszKeyValue, sizeof(dest));
+        *(uint32_t *)&pStruct[pField->iOffset] = (uint32_t)Material_RegisterHandle(dest, 0);
+#ifdef DEDICATEDONLY
+		return 1;
+#else
+        if ( *(uint32_t *)&pStruct[pField->iOffset] || (com_dedicated && com_dedicated->integer))
+        {
+          return 1;
+        }
+        return 0;
+#endif
+      case 11:
+        Q_strncpyz(dest, pszKeyValue, sizeof(dest));
+        *(uint32_t *)&pStruct[pField->iOffset] = (uint32_t)Com_FindSoundAlias(dest);
+        return 1;
+      case 12:
+        return 1;
+      default:
+        if ( pField->iFieldType >= 0 )
+        {
+          assertx(0, "ParseConfigStringToStruct is out of sync with the csParseFieldType_t enum list\n");
+        }
+        else
+        {
+          assertx(0, va("Negative field type %i given to ParseConfigStringToStruct\n", pField->iFieldType));
+        }
+        break;
+    }
+    return 1;
+  }
+  if ( iMaxFieldTypes > 0 && pField->iFieldType < iMaxFieldTypes )
+  {
+    assert(parseSpecialFieldType != NULL);
+    if ( !parseSpecialFieldType(pStruct, pszKeyValue, pField->iFieldType, pField->iOffset) )
+    {
+      return 0;
+    }
+    return 1;
+  }
+  assertx(0, va("Bad field type %i\n", pField->iFieldType));
+  Com_Error(ERR_DROP, "Bad field type %i\n", pField->iFieldType);
+  return 0;
+}
+
+
+
+bool __cdecl ParseConfigStringToStruct(char *pStruct, cspField_t *pFieldList, const int iNumFields, const char *pszBuffer, const int iMaxFieldTypes, int (__cdecl *parseSpecialFieldType)(char *, const char *, const int, const int), void (__cdecl *parseStrCpy)(char *, const char *))
+{
+  char *pszKeyValue;
+  char error;
+  cspField_t *pField;
+  int iField;
+
+  error = 0;
+  iField = 0;
+  pField = pFieldList;
+  while ( iField < iNumFields )
+  {
+    pszKeyValue = Info_ValueForKey(pszBuffer, pField->szName);
+    if ( *pszKeyValue )
+    {
+      error |= KeyValueToField(pStruct, pField, pszKeyValue, iMaxFieldTypes, parseSpecialFieldType, parseStrCpy) == 0;
+	}
+    ++iField;
+    ++pField;
+  }
+  return iField == iNumFields && !error;
+}
+
+
+const char *__cdecl Com_GetExtensionSubString(const char *filename)
+{
+  const char *substr;
+
+  assert(filename);
+
+  substr = 0;
+  while ( *filename )
+  {
+    if ( *filename == '.' )
+    {
+      substr = filename;
+    }
+    else if ( *filename == '/' || *filename == '\\' )
+    {
+      substr = 0;
+    }
+    ++filename;
+  }
+  if ( !substr )
+  {
+    substr = filename;
+  }
+  return substr;
+}
+
+
+void __cdecl Com_StripExtension(const char *in, char *out)
+{
+  const char *extension;
+
+  extension = Com_GetExtensionSubString(in);
+  while ( in != extension )
+  {
+    *out++ = *in++;
+  }
+  *out = 0;
+}
+
+
+double __cdecl GetLeanFraction(const float fFrac)
+{
+  float af;
+
+  af = fabs(fFrac);
+  return (2.0 - af) * fFrac;
+}
+
+char __cdecl Q_CleanChar(char character)
+{
+  if ( character == 0x92 )
+  {
+    return '\'';
+  }
+  return character;
+}
+
+
+qboolean __cdecl I_iscsym(int c){
+    if(c == '_' || Q_isalphanum( c ))
+    {
+        return qtrue;
+    }
+    return qfalse;
+}
+
+
+/*
+============================================================================
+
+					BYTE ORDER FUNCTIONS
+
+============================================================================
+*/
+
+// can't just use function pointers, or dll linkage can
+// mess up when qcommon is included in multiple places
+static short ( *_BigShort )( short l );
+static short ( *_LittleShort )( short l );
+static int ( *_BigLong )( int l );
+static int ( *_LittleLong )( int l );
+static int64_t ( *_BigLong64 )( int64_t l );
+static int64_t ( *_LittleLong64 )( int64_t l );
+static float ( *_BigFloat )( float l );
+static float ( *_LittleFloat )( float l );
+
+short   ShortSwap( short l ) {
+	byte b1,b2;
+
+	b1 = l & 255;
+	b2 = ( l >> 8 ) & 255;
+
+	return ( b1 << 8 ) + b2;
+}
+
+short   ShortNoSwap( short l ) {
+	return l;
+}
+
+int    LongSwap( int l ) {
+	byte b1,b2,b3,b4;
+
+	b1 = l & 255;
+	b2 = ( l >> 8 ) & 255;
+	b3 = ( l >> 16 ) & 255;
+	b4 = ( l >> 24 ) & 255;
+
+	return ( (int)b1 << 24 ) + ( (int)b2 << 16 ) + ( (int)b3 << 8 ) + b4;
+}
+
+int LongNoSwap( int l ) {
+	return l;
+}
+
+int64_t Long64Swap( int64_t llv ) {
+	byte result[8];
+	byte* ll = (byte*)&llv;
+
+	result[0] = ll[7];
+	result[1] = ll[6];
+	result[2] = ll[5];
+	result[3] = ll[4];
+	result[4] = ll[3];
+	result[5] = ll[2];
+	result[6] = ll[1];
+	result[7] = ll[0];
+
+	return *(int64_t*)result;
+}
+
+int64_t Long64NoSwap( int64_t ll ) {
+	return ll;
+}
+
+float FloatSwap( float f ) {
+	union
+	{
+		float f;
+		byte b[4];
+	} dat1, dat2;
+
+
+	dat1.f = f;
+	dat2.b[0] = dat1.b[3];
+	dat2.b[1] = dat1.b[2];
+	dat2.b[2] = dat1.b[1];
+	dat2.b[3] = dat1.b[0];
+	return dat2.f;
+}
+
+float FloatNoSwap( float f ) {
+	return f;
+}
+
+/*
+================
+Swap_Init
+================
+*/
+void Swap_Init( void ) {
+	byte swaptest[2] = {1,0};
+
+// set the byte swapping variables in a portable manner
+	if ( *(short *)swaptest == 1 ) {
+		_BigShort = ShortSwap;
+		_LittleShort = ShortNoSwap;
+		_BigLong = LongSwap;
+		_LittleLong = LongNoSwap;
+		_BigLong64 = Long64Swap;
+		_LittleLong64 = Long64NoSwap;
+		_BigFloat = FloatSwap;
+		_LittleFloat = FloatNoSwap;
+	} else
+	{
+		_BigShort = ShortNoSwap;
+		_LittleShort = ShortSwap;
+		_BigLong = LongNoSwap;
+		_LittleLong = LongSwap;
+		_BigLong64 = Long64NoSwap;
+		_LittleLong64 = Long64Swap;
+		_BigFloat = FloatNoSwap;
+		_LittleFloat = FloatSwap;
+	}
+
+}
+
+double __cdecl UnGetLeanFraction(const float fFrac)
+{
+
+  assert(fFrac >= 0);
+  assert(fFrac <= 1.f);
+  return 1.0 - sqrt(1.0 - fFrac);
+}
+

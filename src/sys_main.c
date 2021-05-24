@@ -28,9 +28,9 @@
 #include "qcommon_io.h"
 #include "qcommon_logprint.h"
 #include "qcommon.h"
+#include "qcommon_mem.h"
 #include "sys_cod4defs.h"
 #include "filesystem.h"
-#include "sys_cod4loader.h"
 #include "sys_thread.h"
 #include "punkbuster.h"
 #include "server.h"
@@ -54,6 +54,7 @@ static char exit_cmdline[MAX_CMD + MAX_OSPATH] = "";
 static char binaryPath[ MAX_OSPATH ] = { 0 };
 static char installPath[ MAX_OSPATH ] = { 0 };
 static char exeFilename[ MAX_OSPATH ] = { 0 };
+static char exeFilenameShort[ MAX_OSPATH ] = { 0 };
 static char cmdline[MAX_CMD + MAX_OSPATH] = "";
 
 #ifndef MAXPRINTMSG
@@ -203,7 +204,7 @@ void Sys_SetExitCmdline(const char* cmdline)
 {
 	if(strlen(cmdline) >= sizeof(exit_cmdline))
 	{
-		Com_PrintError("Sys_SetExitCmdline: Exceeded length of %d characters.\n", sizeof(exit_cmdline) -1);
+		Com_PrintError(CON_CHANNEL_SYSTEM,"Sys_SetExitCmdline: Exceeded length of %d characters.\n", sizeof(exit_cmdline) -1);
 	}
 	Q_strncpyz(exit_cmdline, cmdline, sizeof(exit_cmdline));
 }
@@ -236,18 +237,18 @@ void Sys_DoSignalAction( int signal, const char* sigstring )
 		return;
 	}
 #endif
-	Com_Printf( "Received signal: %s, exiting...\n", sigstring );
+	Com_Printf(CON_CHANNEL_SYSTEM, "Received signal: %s, exiting...\n", sigstring );
 
 	if( signalcaught )
 	{
-		Com_Printf( "DOUBLE SIGNAL FAULT: Received signal: %s, exiting...\n", sigstring);
+		Com_Printf(CON_CHANNEL_SYSTEM, "DOUBLE SIGNAL FAULT: Received signal: %s, exiting...\n", sigstring);
 	}
 
 	else
 	{
 		signalcaught = qtrue;
 		Sys_BeginShutdownWatchdog();
-		Com_Printf("Server received signal: %s\nShutting down server...\n", sigstring);
+		Com_Printf(CON_CHANNEL_SYSTEM,"Server received signal: %s\nShutting down server...\n", sigstring);
 		Com_sprintf(termmsg, sizeof(termmsg), "\nServer received signal: %s\nTerminating server...", sigstring);
 		SV_Shutdown( termmsg );
 		SV_SApiShutdown();
@@ -269,7 +270,7 @@ void Sys_PrintBinVersion( const char* name ) {
 	char* sep = "==============================================================";
 	fprintf( stdout, "\n\n%s\n", sep );
 
-	fprintf( stdout, "%s %s %s build %i %s\n", GAME_STRING,Q3_VERSION,PLATFORM_STRING, BUILD_NUMBER, __DATE__);
+	fprintf( stdout, "%s %s %s build %i %s\n", GAME_STRING,Q3_VERSION,PLATFORM_STRING, Sys_GetBuild(), __DATE__);
 
 	fprintf( stdout, " local install: %s\n", name );
 	fprintf( stdout, "%s\n\n", sep );
@@ -334,12 +335,12 @@ Sys_Print
 */
 void Sys_Print( const char *msg )
 {
-	Sys_EnterCriticalSection(CRIT_CONSOLE);
+	Sys_EnterCriticalSection(CRITSECT_CONSOLE);
 
 //	CON_LogWrite( msg );
 	CON_Print( msg );
 
-	Sys_LeaveCriticalSection(CRIT_CONSOLE);
+	Sys_LeaveCriticalSection(CRITSECT_CONSOLE);
 
 }
 
@@ -376,6 +377,11 @@ void Sys_SetExeFile(const char *filepath)
 	Q_strncpyz(exeFilename, filepath, sizeof(exeFilename));
 }
 
+void Sys_SetExeFileShort(const char *filepath)
+{
+	Q_strncpyz(exeFilenameShort, filepath, sizeof(exeFilenameShort));
+}
+
 /*
 =================
 Sys_ExeFile
@@ -386,6 +392,10 @@ const char* Sys_ExeFile( void )
 	return exeFilename;
 }
 
+const char* Sys_ExeFileShort( void )
+{
+	return exeFilenameShort;
+}
 
 /*
 =================
@@ -462,7 +472,10 @@ int Sys_Main(char* commandLine){
 
     Sys_InitializeCriticalSections();
 
-    Sys_ThreadMain();
+    Sys_InitMainThread();
+//    Sys_ThreadMain();
+
+    Com_InitSmallZoneMemory( );
 
     CON_Init();
     extractor_init();
@@ -488,10 +501,9 @@ void Sys_Restart(const char* reason)
 	SV_Shutdown( reason );
 	SV_SApiShutdown( );
 	Com_sprintf(commandline, sizeof(commandline), "%s %s", Sys_ExeFile(), Sys_GetCommandline());
-	Com_Printf("Restart commandline is: %s\n", commandline);
+	Com_Printf(CON_CHANNEL_SYSTEM,"Restart commandline is: %s\n", commandline);
 	Sys_SetExitCmdline(commandline);
-
-	Cbuf_ExecuteText(EXEC_NOW, "quit\n");
+	Com_Quit_f();
 }
 
 
@@ -535,4 +547,9 @@ void Sys_BeginShutdownWatchdog()
 	watchdogActive = true;
 	Sys_CreateNewThread(Sys_ShutdownWatchdogThread, &tinfo, (void*)timeout);
 
+}
+
+void Sys_Sleep(int msec)
+{
+    Sys_SleepMSec(msec);
 }

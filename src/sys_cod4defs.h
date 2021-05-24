@@ -40,18 +40,15 @@
 
 #define PRODUCT_VERSION "1.0"
 
-#define Q3_VERSION "1.8"
+#define Q3_VERSION "-"
 
 #define GAME_STRING "CoD4 X"
 
-#include "version.h"
-#ifndef BUILD_NUMBER
-#define BUILD_NUMBER -1
-#endif
+#include "version/version.h"
 
 #define MAX_CLIENTS 64
-#define MAX_CONFIGSTRINGS 2442
-
+//#define MAX_CONFIGSTRINGS 2*2442
+#define MAX_CONFIGSTRINGS 4883
 // Configstrings limits.
 #define MAX_LOCATIONSELECTORS  3
 #define MAX_STATUSICONS        8

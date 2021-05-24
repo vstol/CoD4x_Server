@@ -3,24 +3,16 @@
 
 #include "../q_shared.h"
 #include "../q_math.h"
+#include "../dobj.h"
+
+enum XModelLodRampType
+{
+  XMODEL_LOD_RAMP_RIGID = 0x0,
+  XMODEL_LOD_RAMP_SKINNED = 0x1,
+  XMODEL_LOD_RAMP_COUNT = 0x2,
+};
 
 
-#pragma pack(push, 2)
-typedef struct cbrushside_s
-{
-  cplane_t *plane;
-  unsigned int materialNum;
-  short firstAdjacentSideOffset;
-  char edgeCount;
-}cbrushside_t;
-#pragma pack(pop)
- 
-typedef struct DObjAnimMat_s
-{
-  float quat[4];
-  float trans[3];
-  float transWeight;
-}DObjAnimMat_t;
  
 typedef struct XSurfaceVertexInfo_s
 {
@@ -139,15 +131,15 @@ typedef struct XSurface_s
 #elif defined XBOX
   int partBits[4];
 #endif
-}XSurface_t;
- 
+}XSurface;
+
 typedef struct BrushWrapper_s
 {
   float mins[3];
   int contents;
   float maxs[3];
   unsigned int numsides;
-  cbrushside_t *sides;
+  struct cbrushside_s *sides;
   short axialMaterialNum[2][3];
   char *baseAdjacentSide;
   short firstAdjacentSideOffsets[2][3];
@@ -179,13 +171,6 @@ typedef struct PhysGeomList_s
   PhysGeomInfo_t *geoms;
   PhysMass_t mass;
 }PhysGeomList_t;
- 
-typedef struct XBoneInfo_s
-{
-  float bounds[2][3];
-  float offset[3];
-  float radiusSquared;
-}XBoneInfo_t;
  
 typedef struct XModelHighMipBounds_s
 {
@@ -221,7 +206,7 @@ typedef struct XModelLodInfo_s
  typedef void  xMaterial_t;
  typedef void  xPhysPreset_t;
  
-typedef struct XModel_s
+typedef struct XModel
 {
   const char *name;
   char numBones;
@@ -233,8 +218,8 @@ typedef struct XModel_s
   short *quats;
   float *trans;
   char *partClassification;
-  DObjAnimMat_t *baseMat;
-  XSurface_t *surfs;
+  DObjAnimMat *baseMat;
+  XSurface *surfs;
   xMaterial_t **materialHandles;
   XModelLodInfo_t lodInfo[4];
   int field_88;
@@ -244,7 +229,7 @@ typedef struct XModel_s
   XModelCollSurf_t *collSurfs;
   int numCollSurfs;
   int contents;
-  XBoneInfo_t *boneInfo;
+  struct XBoneInfo *boneInfo;
   float radius;
   vec3_t mins;
   vec3_t maxs;
@@ -258,6 +243,33 @@ typedef struct XModel_s
   char field_D3;
   xPhysPreset_t *physPreset;
   PhysGeomList_t *physGeoms;
-}XModel_t;
+}XModel;
+
+
+struct XModelPiece
+{
+  XModel *model;
+  vec3_t offset;
+};
+
+struct XModelPieces
+{
+  const char *name;
+  int numpieces;
+  struct XModelPiece *pieces;
+};
+
+
+#ifdef __cplusplus
+extern "C"{
+#endif
+
+XModel *__cdecl XModelPrecache(const char *name, void *(__cdecl *Alloc)(int), void *(__cdecl *AllocColl)(int));
+int __cdecl XModelNumBones(struct XModel *model);
+int __cdecl XModelGetStaticBounds(XModel *model, float (*axis)[3], float *mins, float *maxs);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __XMODEL_H__

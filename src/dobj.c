@@ -1,72 +1,93 @@
 #include "dobj.h"
+#include "xassets/xmodel.h"
+#include "cscr_stringlist.h"
+/*
+duplicate of void __cdecl DObjDumpInfo(DObj *obj)
 
 void PrintDObjInfo(DObj_t* dobj)
 {
 	int idx, i, j;
-	char* duplicatePartsString;
+	const char* duplicatePartsString;
 
 	if(dobj)
 	{
 		////////////////////////////////////////////////////////////////////////////////////////////////
-		Com_Printf("\nModels:\n");
+		Com_Printf(CON_FIRST_DEBUG_CHANNEL,"\nModels:\n");
 		if ( dobj->numModels > 0 )
 		{
 			idx = 0;
 			for(j = 0; j < dobj->numModels; ++j)
 			{
-				Com_Printf("%d: '%s'\n", idx, dobj->models[j]->name);
+				Com_Printf(CON_FIRST_DEBUG_CHANNEL,"%d: '%s'\n", idx, dobj->models[j]->name);
 				idx += dobj->models[j]->numBones;
 			}
 		}
 		///////////////////////////////////////////////////////////////////////////////////////////////
-		Com_Printf("\nBones:\n");
+		Com_Printf(CON_FIRST_DEBUG_CHANNEL,"\nBones:\n");
 		if(dobj->numBones)
 		{
 			idx = 0;
 			for(i = 0; i < dobj->numModels; ++i)
 			{
 				for(j = 0; j < dobj->models[i]->numBones; ++j)
-					Com_Printf("Bone %d: '%s'\n", idx++, SL_ConvertToString(dobj->models[i]->boneNames[j]));
+					Com_Printf(CON_FIRST_DEBUG_CHANNEL,"Bone %d: '%s'\n", idx++, SL_ConvertToString(dobj->models[i]->boneNames[j]));
 			}
 		}
 		/////////////////////////////////////////////////////////////////////////////////////
-		Com_Printf("\nPart duplicates:\n");
+		Com_Printf(CON_FIRST_DEBUG_CHANNEL,"\nPart duplicates:\n");
 		if(dobj->duplicateParts)
 		{
 			duplicatePartsString = SL_ConvertToString(dobj->duplicateParts);
 			i = 16;
 			while(duplicatePartsString[i])
 			{
-				Com_Printf("%d -> %d\n", duplicatePartsString[i], duplicatePartsString[i + 1]);
+				Com_Printf(CON_FIRST_DEBUG_CHANNEL,"%d -> %d\n", duplicatePartsString[i], duplicatePartsString[i + 1]);
 				i += 2;
 			}
 		}
 		else
-			Com_Printf("\nNo part duplicates.\n");
-		Com_Printf("\n");
+			Com_Printf(CON_FIRST_DEBUG_CHANNEL,"\nNo part duplicates.\n");
+		Com_Printf(CON_FIRST_DEBUG_CHANNEL,"\n");
 	}
 	else
-		Com_Printf("No Dobj\n");
+		Com_Printf(CON_FIRST_DEBUG_CHANNEL,"No Dobj\n");
 }
+*/
 
-signed int (__cdecl *GetDObjPartInfo)(gentity_t *ent, int partNameIdx, DObjPartCacheVectorSet_t *vectorSet) = (signed int(*)(gentity_t*, int, DObjPartCacheVectorSet_t*))0x80CC7BA;
-void (*DObjInit)() = (void(*)())0x081ACB00;
-void (*DB_LoadDObjs)() = (void(*)())0x0812616C;
-
-/* GetDObjForEntity
- * 0x08125E32
- */
-DObj_t* GetDObjForEntity(int entNum)
+void __cdecl ConvertQuatToMat(DObjAnimMat *mat, vec3_t axis[3])
 {
-	if(SV_ENTITY_DOBJS[entNum])
-		return &SV_DOBJ[SV_ENTITY_DOBJS[entNum]];
-	return NULL;
+  vec3_t scaledQuat;
+  float xx;
+  float xy;
+  float xz;
+  float xw;
+  float yy;
+  float yz;
+  float yw;
+  float zz;
+  float zw;
+
+  assert(!IS_NAN((mat->quat)[0]) && !IS_NAN((mat->quat)[1]) && !IS_NAN((mat->quat)[2]) && !IS_NAN((mat->quat)[3]));
+  assert(!IS_NAN(mat->transWeight));
+
+  VectorScale(mat->quat, mat->transWeight, scaledQuat);
+  xx = scaledQuat[0] * mat->quat[0];
+  xy = scaledQuat[0] * mat->quat[1];
+  xz = scaledQuat[0] * mat->quat[2];
+  xw = scaledQuat[0] * mat->quat[3];
+  yy = scaledQuat[1] * mat->quat[1];
+  yz = scaledQuat[1] * mat->quat[2];
+  yw = scaledQuat[1] * mat->quat[3];
+  zz = scaledQuat[2] * mat->quat[2];
+  zw = scaledQuat[2] * mat->quat[3];
+  axis[0][0] = 1.0 - yy + zz;
+  axis[0][1] = xy + zw;
+  axis[0][2] = xz - yw;
+  axis[1][0] = xy - zw;
+  axis[1][1] = 1.0 - xx + zz;
+  axis[1][2] = yz + xw;
+  axis[2][0] = xz + yw;
+  axis[2][1] = yz - xw;
+  axis[2][2] = 1.0 - xx + yy;
 }
 
-/* EntHasDObj
- * 0x0817C89E
- */
-qboolean EntHasDObj(gentity_t* ent)
-{
-	return GetDObjForEntity(ent->s.number) != NULL;
-}

@@ -1,127 +1,301 @@
-# 
-CC=gcc
-CLIBS=-I..\lib_tomcrypt\headers -I..\lib_tomcrypt\math\tommath
-CFLAGS=-m32 -Wall -O0 -g -fno-omit-frame-pointer -c
-WIN_LFLAGS=-m32 -g -Wl,--nxcompat,--image-base,0x8040000,--stack,0x800000 -Tlinkerscript_win32.ld -mwindows
-WIN_LLIBS=-Llib/ -ltomcrypt_win32 -lmbedtls_win32 -lm -lws2_32 -lwsock32 -liphlpapi -lgdi32 -mwindows -lwinmm -static-libgcc -static -lstdc++
-LINUX_LFLAGS=-m32 -static-libgcc -rdynamic -Tlinkerscript.ld
-LINUX_LLIBS=-L./lib -lmbedtls -lmbedcrypto -lmbedx509 -ltomcrypt_linux -ldl -lpthread -lm -lstdc++ -Wl,-rpath=./
-NASM=nasm
-COD4XBIN=cod4x18_dedrun
+############################################
+# A test makefile for incremental building.#
+############################################
+############################################################################
+# By default, building non-OFFICIAL, non-DEBUG version.                    #
+# If you want to get a debug version, use                                  #
+# `make DEBUG=true`                                                        #
+# If you want to get a official version, which does always autoupdate, use #
+# `make release`                                                     #
+############################################################################
 
-ifeq ($(APPVEYOR),True) 
-RM = rm
-else
-RM = del
+##############################
+# A name of server executable.
+
+
+TARGETNAME=cod4x18_dedrun
+
+###################################################################
+# Build system specific information.
+# In git not exist there will be some errors, but nothing critical.
+BUILD_NUMBER=$(shell git rev-list --count HEAD)
+BUILD_BRANCH=$(shell git rev-parse --abbrev-ref HEAD)
+BUILD_REVISION=$(shell git rev-parse HEAD)
+
+ifneq ($(OS),Windows_NT)
+VERSION=$(shell grep '\#define SYS_COMMONVERSION' src/version/version.c | cut -d' ' -f3)
+$(info You build CoD4 version: $(VERSION))
 endif
 
-all:
-	@echo Please specify 'win32', 'win32_dev', 'linux32' or 'linux32_dev' recipy.
+ifeq ($(BUILD_NUMBER), )
+BUILD_NUMBER:=0
+endif
 
-win32: windows zlib_win nasm_win common_updateable_win $(COD4XBIN).exe pexports clean_win
-	@echo [Windows] Updateable PE built successfully.
+ifeq ($(BUILD_BRANCH), )
+BUILD_BRANCH:=no-branch
+endif
 
-win32_dev: windows zlib_win nasm_win common_win $(COD4XBIN).exe pexports clean_win
-	@echo [Windows] Developer PE built successfully.
+ifeq ($(BUILD_REVISION), )
+BUILD_REVISION:=no-revision
+endif
 
-linux32: linux zlib_linux nasm_linux common_updateable_linux $(COD4XBIN).elf clean_linux do_paxctl
-	@echo [Linux] Updateable ELF built successfully.
+###################
+# Compiler options.
+CC=gcc
+CPP=g++
+WIN_DEFINES=WINVER=0x501
+LINUX_DEFINES=_GNU_SOURCE
+CFLAGS=-m32 -msse2 -mfpmath=sse -Wall -fno-omit-frame-pointer -fmax-errors=15
 
-linux32_dev: linux zlib_linux nasm_linux common_linux $(COD4XBIN).elf clean_linux do_paxctl
-	@echo [Linux] Developer ELF built successfully.
+ifeq ($(DEBUG), true)
+DCFLAGS=-fno-pie -O0 -g
+else
+DCFLAGS=-fno-pie -O1 -DNDEBUG
+endif
 
-windows:
-	@echo [Windows] Building specific files...
-	@cd bin && \
-	$(CC) $(CFLAGS) -D WINVER=0x501 -march=nocona $(CLIBS) ../src/win32/*.c
+WIN_LFLAGS=-m32 -g -Wl,--nxcompat,--stack,0x800000 -mwindows -static-libgcc -static -lm
+WIN_LLIBS=tomcrypt mbedtls mbedcrypto mbedx509 ws2_32 wsock32 iphlpapi gdi32 winmm stdc++
+LINUX_LFLAGS=-m32 -g -static-libgcc -rdynamic -Wl,-rpath=./
+LINUX_LLIBS=tomcrypt mbedtls mbedcrypto mbedx509 dl pthread m stdc++
+BSD_LLIBS=tomcrypt mbedtls mbedcrypto mbedx509 pthread m execinfo stdc++
+COD4X_DEFINES=COD4X18UPDATE BUILD_NUMBER=$(BUILD_NUMBER) BUILD_BRANCH=$(BUILD_BRANCH) BUILD_REVISION=$(BUILD_REVISION)
 
-linux:
-	@echo [Linux] Building specific files...
-	@cd bin && \
-	$(CC) $(CFLAGS) -D _GNU_SOURCE -mtune=nocona $(CLIBS) ../src/unix/sys_unix.c ../src/unix/sys_linux.c ../src/unix/elf32_parser.c ../src/unix/sys_cod4linker_linux.c ../src/unix/sys_con_tty.c
+########################
+# Setup directory names.
+SRC_DIR=src
+PLUGIN_DIR=plugins
+BIN_DIR=bin
+LIB_DIR=lib
+OBJ_DIR=obj
+PLUGINS_DIR=plugins
+ZLIB_DIR=$(SRC_DIR)/zlib
+WIN_DIR=$(SRC_DIR)/win32
+LINUX_DIR=$(SRC_DIR)/unix
+ASSETS_DIR=$(SRC_DIR)/xassets
+EXTERNAL=mbedtls tomcrypt
 
-common_win: 
-	@echo [Windows] Building common code...
-	@cd bin && \
-	$(CC) $(CFLAGS) -D COD4X18UPDATE -D WINVER=0x501 -march=nocona ../src/*.c ../src/xassets/*.c
+##############################
+# Setup external applications.
+NASM=nasm
 
-common_linux: 
-	@echo [Linux] Building common code...
-	@cd bin && \
-	$(CC) $(CFLAGS) -D COD4X18UPDATE -D _GNU_SOURCE -march=nocona ../src/*.c ../src/xassets/*.c
+###########################################################
+# Setup OS-specific variables (All the garbage goes there).
+ifeq ($(OS),Windows_NT)
+####################
+# Windows variables.
+BIN_EXT=.exe
+NASMFLAGS=-f win -dWin32 --prefix _
+OS_SOURCES=$(wildcard $(WIN_DIR)/*.c)
+OS_OBJ=$(patsubst $(WIN_DIR)/%.c,$(OBJ_DIR)/%.o,$(OS_SOURCES))
+C_DEFINES=$(addprefix -D,$(COD4X_DEFINES) $(WIN_DEFINES))
+LFLAGS=$(WIN_LFLAGS)
+LLIBS=-L$(LIB_DIR)/ $(addprefix -l,$(WIN_LLIBS))
+RESOURCE_FILE=src/win32/win_cod4.res
+DEF_FILE=$(BIN_DIR)/$(TARGETNAME).def
+INTERFACE_LIB=$(PLUGINS_DIR)/libcom_plugin.a
+ADDITIONAL_OBJ=$(INTERFACE_LIB)
+CLEAN=-del $(subst /,\\,$(OBJ_DIR)/*.o $(DEF_FILE) $(INTERFACE_LIB))
+else
+#################
+# LINUX variables.
+BIN_EXT=
+NASMFLAGS=-f elf
+OS_SOURCES=$(wildcard $(LINUX_DIR)/*.c)
+OS_OBJ=$(patsubst $(LINUX_DIR)/%.c,$(OBJ_DIR)/%.o,$(OS_SOURCES))
+C_DEFINES=$(addprefix -D,$(COD4X_DEFINES) $(LINUX_DEFINES))
+LFLAGS=$(LINUX_LFLAGS)
 
-common_updateable_win:
-	@echo [Windows] Building self-updateable common code...
-	@cd bin && \
-	$(CC) $(CFLAGS) -D COD4X18UPDATE -D OFFICIAL -D WINVER=0x501 -march=nocona ../src/*.c ../src/xassets/*.c
+UNAME := $(shell uname)
+ifeq ($(UNAME),FreeBSD)
+LLIBS=-L./$(LIB_DIR) $(addprefix -l,$(BSD_LLIBS))
+else
+LLIBS=-L./$(LIB_DIR) $(addprefix -l,$(LINUX_LLIBS))
+endif
 
-common_updateable_linux:
-	@echo [Linux] Building self-updateable common code...
-	@cd bin && \
-	$(CC) $(CFLAGS) -D COD4X18UPDATE -D OFFICIAL -D _GNU_SOURCE -march=nocona ../src/*.c ../src/xassets/*.c
+RESOURCE_FILE=
+ADDITIONAL_OBJ=
+CLEAN=-rm $(OBJ_DIR)/*.o $(DEF_FILE) $(INTERFACE_LIB)
 
-zlib_win:
-	@echo [Windows] Building ZLib...
-	@cd bin && \
-	$(CC) $(CFLAGS) -D WINVER=0x501 -mtune=nocona ../src/zlib/*.c
+endif
 
-zlib_linux:
-	@echo [Linux] Building ZLib...
-	@cd bin && \
-	$(CC) $(CFLAGS) -D _GNU_SOURCE -mtune=nocona ../src/zlib/*.c
+#####################
+# Source files lists.
+TARGET=$(addprefix $(BIN_DIR)/,$(TARGETNAME)$(BIN_EXT))
+ASM_SOURCES=$(wildcard $(SRC_DIR)/asmsource/*.asm)
+C_SOURCES=$(wildcard $(SRC_DIR)/*.c)
+CPP_SOURCES=$(wildcard $(SRC_DIR)/*.cpp)
+ZLIB_SOURCES=$(wildcard $(ZLIB_DIR)/*.c)
+ASSETS_SOURCES=$(wildcard $(ASSETS_DIR)/*.c)
 
-nasm_win:
-	@echo [Windows] Building NASM code...
-	@$(NASM) -f coff src/qcommon_hooks.asm         --prefix _ -o bin/qcommon_hooks.o
-	@$(NASM) -f coff src/cmd_hooks.asm             --prefix _ -o bin/cmd_hooks.o
-	@$(NASM) -f coff src/filesystem_hooks.asm      --prefix _ -o bin/filesystem_hooks.o
-	@$(NASM) -f coff src/misc_hooks.asm            --prefix _ -o bin/misc_hooks.o
-	@$(NASM) -f coff src/g_sv_hooks.asm            --prefix _ -o bin/g_sv_hooks.o
-	@$(NASM) -f coff src/xassets_hooks.asm         --prefix _ -o bin/xassets_hooks.o
-	@$(NASM) -f coff src/trace_hooks.asm           --prefix _ -o bin/trace_hooks.o
-	@$(NASM) -f coff src/scr_vm_hooks.asm          --prefix _ -o bin/scr_vm_hooks.o	
-	@$(NASM) -f coff src/server_hooks.asm          --prefix _ -o bin/server_hooks.o
-	@$(NASM) -f coff src/msg_hooks.asm             --prefix _ -o bin/msg_hooks.o
-	@$(NASM) -f coff src/pluginexports.asm -dWin32 --prefix _ -o bin/pluginexports.o
+#################################################################
+# Object files lists. (prefixes for rules may be required later).
+ASM_OBJ=$(patsubst $(SRC_DIR)/asmsource/%.asm,$(OBJ_DIR)/%.o,$(ASM_SOURCES))
+C_OBJ=$(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(C_SOURCES))
+CPP_OBJ=$(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(CPP_SOURCES))
+ZLIB_OBJ=$(patsubst $(ZLIB_DIR)/%.c,$(OBJ_DIR)/%.o,$(ZLIB_SOURCES))
+ASSETS_OBJ=$(patsubst $(ASSETS_DIR)/%.c,$(OBJ_DIR)/%.o,$(ASSETS_SOURCES))
 
-nasm_linux:
-	@echo [Linux] Building NASM code...
-	@$(NASM) -f elf src/qcommon_hooks.asm    -o bin/qcommon_hooks.o
-	@$(NASM) -f elf src/cmd_hooks.asm        -o bin/cmd_hooks.o
-	@$(NASM) -f elf src/filesystem_hooks.asm -o bin/filesystem_hooks.o
-	@$(NASM) -f elf src/misc_hooks.asm       -o bin/misc_hooks.o
-	@$(NASM) -f elf src/g_sv_hooks.asm       -o bin/g_sv_hooks.o
-	@$(NASM) -f elf src/xassets_hooks.asm    -o bin/xassets_hooks.o
-	@$(NASM) -f elf src/trace_hooks.asm      -o bin/trace_hooks.o
-	@$(NASM) -f elf src/scr_vm_hooks.asm     -o bin/scr_vm_hooks.o	
-	@$(NASM) -f elf src/server_hooks.asm     -o bin/server_hooks.o
-	@$(NASM) -f elf src/msg_hooks.asm        -o bin/msg_hooks.o
-	@$(NASM) -f elf src/pluginexports.asm    -o bin/pluginexports.o
-
-$(COD4XBIN).exe:
-	@echo [Windows] Linking binary...
-	@$(CC) $(WIN_LFLAGS) -o bin/$@ bin/*.o src/win32/win_cod4.res $(WIN_LLIBS)
-
-$(COD4XBIN).elf:
-	@echo [Linux] Linking binary...
-	@$(CC) $(LINUX_LFLAGS) -o bin/$(COD4XBIN) bin/*.o $(LINUX_LLIBS)
+#############################################################
+#############################################################
+#############################################################
+#############################################################
+#############################################################
 
 
-pexports:
-	@echo [Windows] Building plugin exports library...
-	@pexports bin/$(COD4XBIN).exe > bin/$(COD4XBIN).def
-	@cd bin && \
-	dlltool -D $(COD4XBIN).exe -d $(COD4XBIN).def -l ../plugins/libcom_plugin.a
+###############################
+# Default rule: rebuild server.
+all: notify $(EXTERNAL) $(TARGET) $(ADDITIONAL_OBJ)
+	@echo Server done
 
-clean_win:
-	@echo [Windows] Cleaning up...
-	@cd bin && \
-	$(RM) *.o
+notify:
+	@echo Server start
 
-clean_linux:
-	@echo [Linux] Cleaning up...
-	@rm bin/*.o
+# defines this new target for tagging and releasing
+.PHONY: release
+release: C_DEFINES+=$(addprefix -D,OFFICIAL)
+release: releaseprolog clean all plugins gittagging
 
-do_paxctl:
-	@/sbin/paxctl -c ./bin/$(COD4XBIN)
-	@/sbin/paxctl -em ./bin/$(COD4XBIN)
+# defines warning message and buildtype official
+.PHONY: releaseprolog
+releaseprolog:
+	@echo ""
+ifneq ($(OS),Windows_NT)
+	@echo "Are you sure you want to create a GitHub Release? [y/N] " && read ans && [ $${ans:-N} = y ]
+endif
+
+.PHONY: gittagging
+gittagging:
+ifneq ($(OS),Windows_NT)
+	git tag -a v$(VERSION)
+	git push origin --tags
+endif	
+
+#################################
+# A rule to make mbedtls library.
+mbedtls:
+	@echo   $(MAKE)  $@
+	@$(MAKE) -C $(SRC_DIR)/$@
+
+##################################
+# A rule to make tomcrypt library.
+tomcrypt:
+	@echo   $(MAKE)  $@
+	@$(MAKE) -C $(SRC_DIR)/$@
+
+##################################
+# A rule to make bot library.
+botlib:
+	@echo   sh  $@
+ifeq ($(OS),Windows_NT)
+#	@cmd.exe /C "@cd $(SRC_DIR)/$@ && @comp.cmd"
+else
+#	cd $(SRC_DIR)/$@ && ./comp.sh
+endif
+
+###############################
+# A rule to link server binary.
+$(TARGET): $(OS_OBJ) $(C_OBJ) $(CPP_OBJ) $(ZLIB_OBJ) $(ASSETS_OBJ) $(ASM_OBJ) obj/version.o
+	@echo   $(CC) $(TARGET)
+# CFLAGS for compiler, LFLAGS for linker.
+	@$(CC) $(LFLAGS) -o $@ $^ $(RESOURCE_FILE) $(LLIBS)
+
+################################
+# A rule to make version module.
+obj/version.o: src/version/version.c FORCE
+	@echo   $(CC)  $@ $(C_DEFINES)
+	@$(CC) -c $(CFLAGS) $(DCFLAGS) $(C_DEFINES) -o $@ $<
+
+############################################
+# An empty rule to force rebuild other rule.
+FORCE:
+
+#####################################
+# A rule to build common server code.
+# -march=nocona
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+	@echo   $(CC)  $@
+	@$(CC) -c $(CFLAGS) $(DCFLAGS) $(C_DEFINES) -o $@ $<
+
+#####################################
+# A rule to build common c++ server code.
+# -march=nocona
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@echo   $(CPP)  $@
+	@$(CPP) -c $(CFLAGS) $(DCFLAGS) $(C_DEFINES) -o $@ $<
+
+################################
+# A rule to build assemler code.
+$(OBJ_DIR)/%.o: $(SRC_DIR)/asmsource/%.asm
+	@echo   $(NASM)  $@
+	@$(NASM) $(NASMFLAGS) $< -o $@
+
+###################################
+# A rule to build zlib source code.
+$(OBJ_DIR)/%.o: $(ZLIB_DIR)/%.c
+	@echo   $(CC)  $@
+	@$(CC) -c $(CFLAGS) $(DCFLAGS) $(C_DEFINES) -o $@ $<
+
+######################################
+# A rule to build xassets source code.
+$(OBJ_DIR)/%.o: $(ASSETS_DIR)/%.c
+	@echo   $(CC)  $@
+	@$(CC) -c $(CFLAGS) $(DCFLAGS) $(C_DEFINES) -o $@ $<
+
+########################################
+# A rule to build Windows specific code.
+$(OBJ_DIR)/%.o: $(WIN_DIR)/%.c
+	@echo   $(CC)  $@
+	@$(CC) -c $(CFLAGS) $(DCFLAGS) $(C_DEFINES) -o $@ $<
+
+########################################
+# A rule to build Linux specific code.
+$(OBJ_DIR)/%.o: $(LINUX_DIR)/%.c
+	@echo   $(CC)  $@
+	@$(CC) -c $(CFLAGS) $(DCFLAGS) $(C_DEFINES) -o $@ $<
+
+########################################################
+# A rule for Windows to create server interface library.
+$(INTERFACE_LIB): $(DEF_FILE) $(TARGET)
+	@echo   dlltool  $@
+	@dlltool -D $(TARGET) -d $(DEF_FILE) -l $@
+
+####################################################################
+# A rule for Windows to create server module definition file (.def).
+$(DEF_FILE): $(TARGET)
+	@echo   pexports  $@
+	@pexports $^ > $@
+
+############################
+# Delete built object files. (Server only)
+clean:
+	@echo   clean Server
+	@$(CLEAN)
+
+############################
+# Delete built object files. (Server only)
+clean_all:
+	@echo   clean Server
+	@$(CLEAN)
+	@echo   clean Mbedtls
+	@$(MAKE) -C $(SRC_DIR)/mbedtls clean
+	@echo   clean Tomcrypt
+	@$(MAKE) -C $(SRC_DIR)/tomcrypt clean
+
+docker: $(TARGET)
+	@docker build . -t cod4x/bleeding
+
+plugins: 
+	@$(MAKE) -C $(PLUGIN_DIR)/screenshotsender
+	#@$(MAKE) -C $(PLUGIN_DIR)/antispam
+	@$(MAKE) -C $(PLUGIN_DIR)/censor
+	@$(MAKE) -C $(PLUGIN_DIR)/cod4x_b3hide
+	@$(MAKE) -C $(PLUGIN_DIR)/simplebanlist
+	@$(MAKE) -C $(PLUGIN_DIR)/example_cpp_plugin
+	@$(MAKE) -C $(PLUGIN_DIR)/pchat
+	@$(MAKE) -C $(PLUGIN_DIR)/sourcebansplugin
+	@$(MAKE) -C $(PLUGIN_DIR)/warn
+	#@$(MAKE) -C $(PLUGIN_DIR)/julia
+	@$(MAKE) -C $(PLUGIN_DIR)/legacybanlist
+
+
+.PHONY: plugins

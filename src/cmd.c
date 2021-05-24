@@ -83,7 +83,7 @@ void Cbuf_AddText( const char *text ) {
 	byte*		new_buf;
 	len = strlen (text) +1;
 
-	Sys_EnterCriticalSection(CRIT_CBUF);
+	Sys_EnterCriticalSection(CRITSECT_CBUF);
 
 	if ( len + cmd_text.cursize > cmd_text.maxsize ) {
 
@@ -100,8 +100,8 @@ void Cbuf_AddText( const char *text ) {
 
 		if(new_buf == NULL)
 		{
-			Com_PrintError( "Cbuf_AddText overflowed ; realloc failed\n" );
-			Sys_LeaveCriticalSection(CRIT_CBUF);
+			Com_PrintError(CON_CHANNEL_SYSTEM, "Cbuf_AddText overflowed ; realloc failed\n" );
+			Sys_LeaveCriticalSection(CRITSECT_CBUF);
 			return;
 		}
 		cmd_text.data = new_buf;
@@ -111,7 +111,7 @@ void Cbuf_AddText( const char *text ) {
 	Com_Memcpy(&cmd_text.data[cmd_text.cursize], text, len -1);
 	cmd_text.cursize += len -1;
 
-	Sys_LeaveCriticalSection(CRIT_CBUF);
+	Sys_LeaveCriticalSection(CRITSECT_CBUF);
 
 }
 
@@ -130,7 +130,7 @@ void Cbuf_InsertText( const char *text ) {
 
 	len = strlen( text ) + 1;
 
-	Sys_EnterCriticalSection(CRIT_CBUF);
+	Sys_EnterCriticalSection(CRITSECT_CBUF);
 
 
 	if ( len + cmd_text.cursize > cmd_text.maxsize ) {
@@ -148,9 +148,9 @@ void Cbuf_InsertText( const char *text ) {
 
 		if(new_buf == NULL)
 		{
-			Com_PrintError( "Cbuf_InsertText overflowed ; realloc failed\n" );
+			Com_PrintError(CON_CHANNEL_SYSTEM, "Cbuf_InsertText overflowed ; realloc failed\n" );
 
-			Sys_LeaveCriticalSection(CRIT_CBUF);
+			Sys_LeaveCriticalSection(CRITSECT_CBUF);
 			return;
 		}
 		cmd_text.data = new_buf;
@@ -170,7 +170,7 @@ void Cbuf_InsertText( const char *text ) {
 
 	cmd_text.cursize += len;
 
-	Sys_LeaveCriticalSection(CRIT_CBUF);
+	Sys_LeaveCriticalSection(CRITSECT_CBUF);
 }
 
 /*
@@ -184,17 +184,17 @@ void Cbuf_ExecuteText (int exec_when, const char *text)
 	{
 	case EXEC_NOW:
 
-		Sys_EnterCriticalSection(CRIT_CBUF);
+		Sys_EnterCriticalSection(CRITSECT_CBUF);
 
 		if (text && strlen(text) > 0) {
-			Com_DPrintf(S_COLOR_YELLOW "EXEC_NOW %s\n", text);
+			Com_DPrintf(CON_CHANNEL_SYSTEM, S_COLOR_YELLOW "EXEC_NOW %s\n", text);
 			Cmd_ExecuteString (text);
 		} else {
 			Cbuf_Execute();
-			Com_DPrintf(S_COLOR_YELLOW "EXEC_NOW %s\n", cmd_text.data);
+			Com_DPrintf(CON_CHANNEL_SYSTEM, S_COLOR_YELLOW "EXEC_NOW %s\n", cmd_text.data);
 		}
 
-		Sys_LeaveCriticalSection(CRIT_CBUF);
+		Sys_LeaveCriticalSection(CRITSECT_CBUF);
 
 		break;
 	case EXEC_INSERT:
@@ -343,7 +343,7 @@ qboolean Cmd_AddCommandGeneric( const char *cmd_name, const char* helptext, xcom
 		if ( !strcmp( cmd_name, cmd->name )) {
 			// allow completion-only commands to be silently doubled
 			if ( function != NULL && warn) {
-				Com_PrintWarning( "Cmd_AddCommand: %s already defined\n", cmd_name );
+				Com_PrintWarning(CON_CHANNEL_SYSTEM, "Cmd_AddCommand: %s already defined\n", cmd_name );
 			}
 			return qfalse;
 		}
@@ -413,7 +413,7 @@ void Cmd_Exec_f( void ) {
 	char filename[MAX_QPATH];
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Printf( "exec <filename> : execute a script file\n" );
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "exec <filename> : execute a script file\n" );
 		return;
 	}
 
@@ -421,10 +421,10 @@ void Cmd_Exec_f( void ) {
 	COM_DefaultExtension( filename, sizeof( filename ), ".cfg" );
 	FS_ReadFile( filename, (void **)&f );
 	if ( !f ) {
-		Com_Printf( "couldn't exec %s\n",Cmd_Argv( 1 ) );
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "couldn't exec %s\n",Cmd_Argv( 1 ) );
 		return;
 	}
-	Com_Printf( "execing %s\n",Cmd_Argv( 1 ) );
+	Com_Printf(CON_CHANNEL_DONT_FILTER, "execing %s\n",Cmd_Argv( 1 ) );
 
 	Cbuf_InsertText( f );
 
@@ -444,7 +444,7 @@ void Cmd_Vstr_f( void ) {
 	char c_str[1024];
 
 	if (Cmd_Argc () != 2) {
-		Com_Printf ("vstr <variablename> : execute a variable command\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"vstr <variablename> : execute a variable command\n");
 		return;
 	}
 
@@ -465,7 +465,7 @@ void Cmd_Echo_f (void)
 {
 	char buf[MAX_STRING_CHARS];
 
-	Com_Printf ("%s\n", Cmd_Args(buf, sizeof(buf)));
+	Com_Printf(CON_CHANNEL_DONT_FILTER,"%s\n", Cmd_Args(buf, sizeof(buf)));
 }
 
 /*
@@ -547,6 +547,7 @@ typedef struct{
 }cmdTokenizer_t;
 
 static cmdTokenizer_t tokenStrings;
+static cmdTokenizer_t sv_tokenStrings;
 
 
 
@@ -561,6 +562,14 @@ int	Cmd_Argc( void ) {
 		return 0;
 
 	return tokenStrings.cmd_argcList[tokenStrings.currentString -1];
+}
+
+int	SV_Cmd_Argc( void ) {
+
+	if(sv_tokenStrings.currentString == 0)
+		return 0;
+
+	return sv_tokenStrings.cmd_argcList[sv_tokenStrings.currentString -1];
 }
 
 /*
@@ -588,6 +597,28 @@ char	*Cmd_Argv( int arg ) {
 	    return "";
 
 	return tokenStrings.cmd_argv[final_argc];
+}
+
+
+char	*SV_Cmd_Argv( int arg ) {
+
+	int cmd_argc;
+	int final_argc;
+
+	cmd_argc = SV_Cmd_Argc();
+
+	if(cmd_argc == 0)
+	    return "";
+
+	if(cmd_argc - arg <= 0)
+            return "";
+
+        final_argc = sv_tokenStrings.cmd_argc - cmd_argc + arg;
+
+	if(sv_tokenStrings.cmd_argv[final_argc] == NULL)
+	    return "";
+
+	return sv_tokenStrings.cmd_argv[final_argc];
 }
 
 
@@ -620,9 +651,9 @@ char	*Cmd_Args( char* buff, int bufsize ) {
 
 	buff[0] = 0;
 	for ( i = 1 ; i < cmd_argc ; i++ ) {
-		Q_strcat( buff, bufsize, Cmd_Argv(i) );
+		Q_strncat( buff, bufsize, Cmd_Argv(i) );
 		if ( i != cmd_argc-1 ) {
-			Q_strcat( buff, bufsize, " " );
+			Q_strncat( buff, bufsize, " " );
 		}
 	}
 
@@ -644,14 +675,30 @@ char	*Cmd_Argsv( int arg, char* buff, int bufsize ) {
 	int		cmd_argc = Cmd_Argc();
 	buff[0] = 0;
 	for ( i = arg ; i < cmd_argc ; i++ ) {
-		Q_strcat( buff, bufsize, Cmd_Argv(i) );
+		Q_strncat( buff, bufsize, Cmd_Argv(i) );
 		if ( i != cmd_argc-1 ) {
-			Q_strcat( buff, bufsize, " " );
+			Q_strncat( buff, bufsize, " " );
 		}
 	}
 
 	return buff;
 }
+
+char	*SV_Cmd_Argsv( int arg, char* buff, int bufsize ) {
+
+	int		i;
+	int		cmd_argc = SV_Cmd_Argc();
+	buff[0] = 0;
+	for ( i = arg ; i < cmd_argc ; i++ ) {
+		Q_strncat( buff, bufsize, SV_Cmd_Argv(i) );
+		if ( i != cmd_argc-1 ) {
+			Q_strncat( buff, bufsize, " " );
+		}
+	}
+
+	return buff;
+}
+
 
 typedef struct{
 	int cmd_argc;
@@ -677,6 +724,22 @@ void Cmd_EndTokenizedString( )
     }
 }
 
+void SV_Cmd_EndTokenizedString( )
+{
+    if(sv_tokenStrings.currentString <= 0)
+    {
+        Com_Error(ERR_FATAL, "Cmd_EndTokenizedString( ): Attempt to free more tokenized strings than tokenized");
+        return;
+    }
+    --sv_tokenStrings.currentString;
+
+    if(sv_tokenStrings.currentString < MAX_TOKENIZE_STRINGS)
+    {
+        sv_tokenStrings.cmd_argc -= sv_tokenStrings.cmd_argcList[sv_tokenStrings.currentString];
+    }
+}
+
+
 /*
 ============
 Cmd_TokenizeString
@@ -695,7 +758,7 @@ static void Cmd_TokenizeStringInternal( const char *text_in, qboolean ignoreQuot
 
 #ifdef TKN_DBG
   // FIXME TTimo blunt hook to try to find the tokenization of userinfo
-  Com_DPrintf("Cmd_TokenizeString: %s\n", text_in);
+  Com_DPrintf(CON_CHANNEL_SYSTEM,"Cmd_TokenizeString: %s\n", text_in);
 #endif
 
 	if ( !text_in ) {
@@ -707,7 +770,7 @@ static void Cmd_TokenizeStringInternal( const char *text_in, qboolean ignoreQuot
 
 	while ( 1 ) {
 		if ( param->cmd_argc == MAX_STRING_TOKENS ) {
-			Com_PrintError("Cmd_TokenizeString(): MAX_STRING_TOKENS exceeded\n");
+			Com_PrintError(CON_CHANNEL_SYSTEM,"Cmd_TokenizeString(): MAX_STRING_TOKENS exceeded\n");
 			return;			// this is usually something malicious
 		}
 
@@ -752,7 +815,7 @@ static void Cmd_TokenizeStringInternal( const char *text_in, qboolean ignoreQuot
 			--param->availableBuf;
 			if(param->availableBuf < 2)
 			{
-				Com_PrintError("Cmd_TokenizeString(): length of tokenize buffer exceeded\n");
+				Com_PrintError(CON_CHANNEL_SYSTEM,"Cmd_TokenizeString(): length of tokenize buffer exceeded\n");
 				return;
 			}
 			param->cmd_argc++;
@@ -792,7 +855,7 @@ static void Cmd_TokenizeStringInternal( const char *text_in, qboolean ignoreQuot
 
 		if(param->availableBuf < 2)
 		{
-			Com_PrintError("Cmd_TokenizeString(): length of tokenize buffer exceeded\n");
+			Com_PrintError(CON_CHANNEL_SYSTEM,"Cmd_TokenizeString(): length of tokenize buffer exceeded\n");
 			return;
 		}
 
@@ -846,7 +909,51 @@ static void Cmd_TokenizeString2( const char *text_in, qboolean ignore_quotes ) {
 		tokenStrings.cmd_argc = param.cmd_argc;
 		tokenStrings.currentString++;
 	}else{
-		Com_PrintError("Cmd_TokenizeString(): MAX_TOKENIZE_STRINGS exceeded\n");
+		Com_PrintError(CON_CHANNEL_SYSTEM,"Cmd_TokenizeString(): MAX_TOKENIZE_STRINGS exceeded\n");
+	}
+}
+
+
+/*
+============
+SV_Cmd_TokenizeString
+============
+*/
+static void SV_Cmd_TokenizeString2( const char *text_in, qboolean ignore_quotes ) {
+
+	cmdTokenizeParams_t param;
+	int oldargc;
+	int occupiedBuf;
+
+	oldargc = sv_tokenStrings.cmd_argc;
+
+	if(sv_tokenStrings.currentString < MAX_TOKENIZE_STRINGS)
+	{
+
+		param.cmd_argc = sv_tokenStrings.cmd_argc;
+		param.cmd_argv = sv_tokenStrings.cmd_argv;
+
+		if(sv_tokenStrings.currentString > 0)
+		{
+			if(sv_tokenStrings.cmd_argv[sv_tokenStrings.cmd_argc] == NULL)
+			{
+				Com_Error(ERR_FATAL, "Cmd_TokenizeString( ): Free string is a NULL pointer...");
+			}
+			param.cmd_tokenized = sv_tokenStrings.cmd_argv[sv_tokenStrings.cmd_argc];
+		}else{
+			param.cmd_tokenized = sv_tokenStrings.cmd_tokenized;
+		}
+
+		occupiedBuf = param.cmd_tokenized - sv_tokenStrings.cmd_tokenized;
+		param.availableBuf = sizeof(sv_tokenStrings.cmd_tokenized) - occupiedBuf;
+
+		Cmd_TokenizeStringInternal( text_in, ignore_quotes, &param );
+
+		sv_tokenStrings.cmd_argcList[sv_tokenStrings.currentString] = param.cmd_argc - oldargc;
+		sv_tokenStrings.cmd_argc = param.cmd_argc;
+		sv_tokenStrings.currentString++;
+	}else{
+		Com_PrintError(CON_CHANNEL_SYSTEM,"Cmd_TokenizeString(): MAX_TOKENIZE_STRINGS exceeded\n");
 	}
 }
 
@@ -867,6 +974,16 @@ Cmd_TokenizeString
 */
 void Cmd_TokenizeString( const char *text_in ) {
 	Cmd_TokenizeString2( text_in, qfalse);
+}
+
+
+/*
+============
+SV_Cmd_TokenizeString
+============
+*/
+void SV_Cmd_TokenizeString( const char *text_in ) {
+	SV_Cmd_TokenizeString2( text_in, qfalse);
 }
 
 
@@ -947,7 +1064,7 @@ qboolean Cmd_InfoSetPower( const char *infostring )
         Q_strncpyz(cmdname, Info_ValueForKey(infostring, "cmd"), sizeof(cmdname));
 
         if(!Cmd_SetPower(cmdname, power)){
-            Com_DPrintf("Warning: Commandname %s is not known yet\n", cmdname);
+            Com_DPrintf(CON_CHANNEL_SYSTEM,"Warning: Commandname %s is not known yet\n", cmdname);
             return qfalse;
         }
         return qtrue;
@@ -960,15 +1077,15 @@ void Cmd_WritePowerConfig(char* buffer, int size)
     char infostring[MAX_INFO_STRING];
 	mvabuf;
 
-    Q_strcat(buffer, size,"\n//Minimum power settings\n");
+    Q_strncat(buffer, size,"\n//Minimum power settings\n");
     cmd_function_t *cmd;
     for ( cmd = cmd_functions ; cmd ; cmd = cmd->next ){
         *infostring = 0;
         Info_SetValueForKey(infostring, "type", "cmdMinPower");
         Info_SetValueForKey(infostring, "cmd", cmd->name);
         Info_SetValueForKey(infostring, "power", va("%i",cmd->minPower));
-        Q_strcat(buffer, size, infostring);
-        Q_strcat(buffer, size, "\\\n");
+        Q_strncat(buffer, size, infostring);
+        Q_strncat(buffer, size, "\\\n");
     }
 }
 
@@ -1000,23 +1117,23 @@ static void Cmd_ListPower_f() {
 			hidden++;
 			continue;
 		}
-		Com_Printf ("%s", cmd->name );
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"%s", cmd->name );
 
 		l = 24 - strlen(cmd->name);
 		j = 0;
 
 		do
 		{
-			Com_Printf (" ");
+			Com_Printf(CON_CHANNEL_DONT_FILTER," ");
 			j++;
 		} while(j < l);
 
-		Com_Printf( "%d\n", cmd->minPower );
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "%d\n", cmd->minPower );
 		i++;
 	}
-	Com_Printf( "\n%i commands with specified power settings are shown\n", i );
-	Com_Printf( "%i commands are hidden because the required power level for those commands is set to 100 or 0\n", hidden );
-	Com_Printf( "Type cmdlist to get a complete list of all commands\n");
+	Com_Printf(CON_CHANNEL_DONT_FILTER, "\n%i commands with specified power settings are shown\n", i );
+	Com_Printf(CON_CHANNEL_DONT_FILTER, "%i commands are hidden because the required power level for those commands is set to 100 or 0\n", hidden );
+	Com_Printf(CON_CHANNEL_DONT_FILTER, "Type cmdlist to get a complete list of all commands\n");
 }
 
 
@@ -1035,16 +1152,7 @@ void	Cmd_ExecuteString( const char *text )
 {
 	cmd_function_t	*cmd, **prev;
 	char arg0[MAX_TOKEN_CHARS];
-#ifdef PUNKBUSTER
-	/* Trap commands going to PunkBuster here */
-	if(!Q_stricmpn(text, "pb_sv_", 6))
-	{
-		if(gamebinary_initialized == 1)
-			PbSvAddEvent(14, -1, strlen(text), (char*)text);
 
-		return;
-	}
-#endif
 	// execute the command line
 	Cmd_TokenizeString( text );
 	if ( !Cmd_Argc() ) {
@@ -1062,29 +1170,29 @@ void	Cmd_ExecuteString( const char *text )
 		if(!Q_stricmp(arg0, "authChangePassword"))
 		{
 			Q_strncpyz(arg0, "changePassword", sizeof(arg0));
-			Com_PrintWarning("\"authchangePassword\" is deprecated and will be removed soon. Use \"changePassword\" instead\n");
+			Com_PrintWarning(CON_CHANNEL_SYSTEM,"\"authchangePassword\" is deprecated and will be removed soon. Use \"changePassword\" instead\n");
 		}
 		else if(!Q_stricmp(arg0, "authSetAdmin"))
 		{
 			Q_strncpyz(arg0, "AdminAddAdminWithPassword", sizeof(arg0));
-			Com_PrintWarning("\"authSetAdmin\" is deprecated and will be removed soon. Use \"AdminAddAdminWithPassword\" instead\n");
+			Com_PrintWarning(CON_CHANNEL_SYSTEM,"\"authSetAdmin\" is deprecated and will be removed soon. Use \"AdminAddAdminWithPassword\" instead\n");
 		}
 		else if(!Q_stricmp(arg0, "authUnsetAdmin"))
 		{
 			Q_strncpyz(arg0, "AdminRemoveAdmin", sizeof(arg0));
-			Com_PrintWarning("\"authUnsetAdmin\" is deprecated and will be removed soon. Use \"AdminRemoveAdmin\" instead\n");
+			Com_PrintWarning(CON_CHANNEL_SYSTEM,"\"authUnsetAdmin\" is deprecated and will be removed soon. Use \"AdminRemoveAdmin\" instead\n");
 		}
 		else if(!Q_stricmp(arg0, "authListAdmins"))
 		{
 			Q_strncpyz(arg0, "adminListAdmins", sizeof(arg0));
-			Com_PrintWarning("\"authListAdmins\" is deprecated and will be removed soon. Use \"adminListAdmins\" instead\n");
+			Com_PrintWarning(CON_CHANNEL_SYSTEM,"\"authListAdmins\" is deprecated and will be removed soon. Use \"adminListAdmins\" instead\n");
 		}
 	}else if(!Q_stricmp(arg0, "cmdpowerlist")){
 		Q_strncpyz(arg0, "AdminListCommands", sizeof(arg0));
-		Com_PrintWarning("\"cmdpowerlist\" is deprecated and will be removed soon. Use \"AdminListCommands\" instead\n");
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"\"cmdpowerlist\" is deprecated and will be removed soon. Use \"AdminListCommands\" instead\n");
 	}else if(!Q_stricmp(arg0, "setCmdMinPower")){
 		Q_strncpyz(arg0, "AdminChangeCommandPower", sizeof(arg0));
-		Com_PrintWarning("\"setCmdMinPower\" is deprecated and will be removed soon. Use \"AdminChangeCommandPower\" instead\n");
+		Com_PrintWarning(CON_CHANNEL_SYSTEM,"\"setCmdMinPower\" is deprecated and will be removed soon. Use \"AdminChangeCommandPower\" instead\n");
 	}else if(!Q_stricmp(arg0, "kickid")){
 		Q_strncpyz(arg0, "kick", sizeof(arg0));
 	}
@@ -1133,7 +1241,7 @@ void	Cmd_ExecuteString( const char *text )
 	if(!Q_stricmpn(arg0, "con_showchannel", 15))
 		return;
 
-	Com_Printf("Bad command or cvar: %s\n", arg0);
+	Com_Printf(CON_CHANNEL_SYSTEM,"Bad command or cvar: %s\n", arg0);
 }
 
 void Cmd_ExecuteSingleCommand(int arg1, int arg2, const char* text)
@@ -1167,10 +1275,10 @@ static void Cmd_List_f( void ) {
 				continue;
 			}
 		}
-		Com_Printf( "%s\n", cmd->name );
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "%s\n", cmd->name );
 		i++;
 	}
-	Com_Printf( "%i commands\n", i );
+	Com_Printf(CON_CHANNEL_DONT_FILTER, "%i commands\n", i );
 }
 
 
@@ -1188,7 +1296,7 @@ static void Cmd_Help_f( void ) {
 	{
 		cmdname = Cmd_Argv( 1 );
 	}else{
-		Com_Printf("Displaying common help here\n\n");
+		Com_Printf(CON_CHANNEL_SYSTEM,"Displaying common help here\n\n");
 		return;
 	}
 
@@ -1199,16 +1307,16 @@ static void Cmd_Help_f( void ) {
 		}
 		if(cmd->helptext == NULL)
 		{
-			Com_Printf("For command %s is no help available\n", cmd->name);
+			Com_Printf(CON_CHANNEL_SYSTEM,"For command %s is no help available\n", cmd->name);
 			return;
 		}
-		Com_Printf("Help for %s:\n", cmd->name);
-		Com_Printf("-------------------------------------\n");
-		Com_Printf("%s\n", cmd->helptext);
-		Com_Printf("-------------------------------------\n");
+		Com_Printf(CON_CHANNEL_SYSTEM,"Help for %s:\n", cmd->name);
+		Com_Printf(CON_CHANNEL_SYSTEM,"-------------------------------------\n");
+		Com_Printf(CON_CHANNEL_SYSTEM,"%s\n", cmd->helptext);
+		Com_Printf(CON_CHANNEL_SYSTEM,"-------------------------------------\n");
 		return;
 	}
-	Com_Printf( "Help: Couldn't find command: %s\n", cmdname );
+	Com_Printf(CON_CHANNEL_SYSTEM, "Help: Couldn't find command: %s\n", cmdname );
 }
 */
 
@@ -1297,3 +1405,4 @@ void Cmd_Init( void ) {
 	Cmd_ResetInvokerInfo();
 	//Cmd_AddCommand( "help", Cmd_Help_f ); Not ready yet
 }
+

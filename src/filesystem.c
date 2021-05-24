@@ -255,31 +255,8 @@ static char lastValidGame[MAX_OSPATH];
 static int fs_numServerIwds;
 static int fs_serverIwds[1024];
 static char *fs_serverIwdNames[1024];
-
-
-#define FS_ListFiles( dir, extension, nfiles ) Sys_ListFiles(dir, extension, 0, nfiles, 0)
-#define FS_FreeFileList Sys_FreeFileList
-
-/*
-typedef void (__cdecl *tFS_WriteFile)(const char* qpath, const void *buffer, int size);
-tFS_WriteFile FS_WriteFile = (tFS_WriteFile)(0x818a58c);
-
-typedef void (__cdecl *tFS_FreeFile)(void *buffer);
-tFS_FreeFile FS_FreeFile = (tFS_FreeFile)(0x8187430);
-
-typedef void (__cdecl *tFS_SV_Rename)(const char* from,const char* to);
-tFS_SV_Rename FS_SV_Rename = (tFS_SV_Rename)(0x81287da);
-
-typedef int (__cdecl *tFS_Write)(void const* data,int length, fileHandle_t);
-tFS_Write FS_Write = (tFS_Write)(0x8186ec4);
-
-typedef int (__cdecl *tFS_Read)(void const* data,int length, fileHandle_t);
-tFS_Read FS_Read = (tFS_Read)(0x8186f64);
-*/
-
-
-
-
+static int *fs_additionalPureChecksums;
+static int fs_additionalPureChecksumCount;
 
 /*
 ==============
@@ -289,7 +266,8 @@ FS_Initialized
 
 qboolean FS_Initialized() {
 
-	return (fs_searchpaths != NULL);
+	bool init = (fs_searchpaths != NULL);
+	return init;
 }
 
 /*
@@ -301,24 +279,24 @@ return load stack
 int FS_LoadStack() {
 	int val;
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 	val = fs_loadStack;
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 	return val;
 }
 
 void FS_LoadStackInc()
 {
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 	fs_loadStack++;
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 }
 void FS_LoadStackDec()
 {
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 	fs_loadStack--;
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 }
 
 
@@ -345,7 +323,7 @@ static fileHandle_t FS_HandleForFileForThread(int FsThread)
 	size = 48;
   }
 
-  Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+  Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
   for (i = 0 ; size > i ; i++)
   {
@@ -354,24 +332,24 @@ static fileHandle_t FS_HandleForFileForThread(int FsThread)
 		if ( fs_debug->integer > 1 )
 			Sys_Print(va("^4Open filehandle: %d\n", i + startIndex));
 
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 		return i + startIndex;
     }
   }
 
-  Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+  Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
   if ( !FsThread )
   {
 	for(i = 1; i < MAX_FILE_HANDLES; i++)
 	{
-		Com_Printf("FILE %2i: '%s' 0x%x\n", i, fsh[i].name, fsh[i].handleFiles.file.o);
+		Com_Printf(CON_CHANNEL_FILES,"FILE %2i: '%s' 0x%x\n", i, fsh[i].name, fsh[i].handleFiles.file.o);
 	}
 	Com_Error(2, "FS_HandleForFile: none free");
   }
-  Com_PrintWarning( "FILE %2i: '%s' 0x%x\n", startIndex, fsh[startIndex].name, fsh[startIndex].handleFiles.file.o);
-  Com_PrintWarning( "FS_HandleForFile: none free (%d)\n", FsThread);
+  Com_PrintWarning(CON_CHANNEL_FILES, "FILE %2i: '%s' 0x%x\n", startIndex, fsh[startIndex].name, fsh[startIndex].handleFiles.file.o);
+  Com_PrintWarning(CON_CHANNEL_FILES, "FS_HandleForFile: none free (%d)\n", FsThread);
   return 0;
 }
 
@@ -512,7 +490,7 @@ FS_ReplaceSeparators
 Fix things up differently for win/unix/mac
 ====================
 */
-static void FS_ReplaceSeparators( char *path ) {
+void FS_ReplaceSeparators( char *path ) {
 	char	*s;
 
 	for ( s = path ; *s ; s++ ) {
@@ -534,12 +512,37 @@ void FS_StripTrailingSeperator( char *path ) {
 
 	int len = strlen(path);
 
-	if(path[len -1] == PATH_SEP)
+	if(path[len -1] == '\\' || path[len -1] == '/')
 	{
 		path[len -1] = '\0';
 	}
 }
 
+
+void FS_StripSeperators(char* qpath)
+{
+	int i, y;
+	char newpath[4096];
+	int len = strlen(qpath);
+
+	if(len > sizeof(newpath))
+	{
+		len = sizeof(newpath);
+	}
+
+	for(i = 0, y = 0; i < len; ++i)
+	{
+		if((qpath[i] == '\\' || qpath[i] == '/') && (qpath[i +1] == '\\' || qpath[i +1] == '/'))
+		{
+			continue;
+		}
+		newpath[y] = qpath[i];
+		++y;
+	}
+	newpath[y] = '\0';
+	FS_StripTrailingSeperator( newpath );
+	Q_strncpyz(qpath, newpath, len +1);
+}
 
 
 void FS_BuildOSPathForThread(const char *base, const char *game, const char *qpath, char *fs_path, int fs_thread)
@@ -592,7 +595,7 @@ qboolean FS_CreatePath (char *OSPath) {
 	// make absolutely sure that it can't back up the path
 	// FIXME: is c: allowed???
 	if ( strstr( OSPath, ".." ) || strstr( OSPath, "::" ) ) {
-		Com_Printf( "WARNING: refusing to create relative path \"%s\"\n", OSPath );
+		Com_Printf(CON_CHANNEL_FILES, "WARNING: refusing to create relative path \"%s\"\n", OSPath );
 		return qtrue;
 	}
 
@@ -776,6 +779,8 @@ char* FS_SV_GetFilepath( const char *file, char* testpath, int lenpath )
 }
 
 
+
+
 /*
 ===========
 FS_Rename
@@ -933,10 +938,33 @@ void FS_SV_HomeRename( const char *from, const char *to ) {
 	}
 }
 
+qboolean __cdecl FS_FilesAreLoadedGlobally(const char *filename)
+{
+  const char *extensions[10];
+  int filenameLen;
+  int extensionNum;
 
-
-
-
+  extensions[0] = ".hlsl";
+  extensions[1] = ".txt";
+  extensions[2] = ".cfg";
+  extensions[3] = ".levelshots";
+  extensions[4] = ".menu";
+  extensions[5] = ".arena";
+  extensions[6] = ".str";
+  extensions[7] = ".so";
+  extensions[8] = ".dll";
+  extensions[8] = ".sum";
+  extensions[9] = "";
+  filenameLen = strlen(filename);
+  for ( extensionNum = 0; *extensions[extensionNum]; ++extensionNum )
+  {
+    if ( !Q_stricmp(&filename[filenameLen - strlen(extensions[extensionNum])], extensions[extensionNum]) )
+    {
+      return qtrue;
+    }
+  }
+  return qfalse;
+}
 
 /*
 ===========
@@ -1108,7 +1136,7 @@ int FS_PathCmp( const char *s1, const char *s2 ) {
 return a hash value for the filename
 ================
 */
-static long FS_HashFileName( const char *fname, int hashSize ) {
+long FS_HashFileName( const char *fname, int hashSize ) {
 	int i;
 	long hash;
 	char letter;
@@ -1157,9 +1185,6 @@ long FS_FOpenFileReadDir(const char *filename, searchpath_t *search, fileHandle_
 	int		err;
 	unz_file_info	file_info;
 	mvabuf;
-	char *noReferenceExts[] = { "cod4_lnxded-bin", ".so", ".dll", ".hlsl", ".txt", ".cfg", ".levelshots", ".menu", ".arena", ".str", NULL };
-	char **testExt;
-
 
 	if(filename == NULL)
 		Com_Error(ERR_FATAL, "FS_FOpenFileRead: NULL 'filename' parameter passed");
@@ -1206,13 +1231,13 @@ long FS_FOpenFileReadDir(const char *filename, searchpath_t *search, fileHandle_
 						err = unzLocateFile( pak->handle, pakFile->name, 2);
 						if(err != UNZ_OK)
 						{
-							Com_PrintWarning("Read error in Zip-file: %s\n", pak->pakFilename);
+							Com_PrintWarning(CON_CHANNEL_FILES,"Read error in Zip-file: %s\n", pak->pakFilename);
 							return 1;
 						}
 						err = unzGetCurrentFileInfo( pak->handle, &file_info, netpath, sizeof( netpath ), NULL, 0, NULL, 0 );
 						if(err != UNZ_OK)
 						{
-							Com_PrintWarning("Read error in Zip-file: %s\n", pak->pakFilename);
+							Com_PrintWarning(CON_CHANNEL_FILES,"Read error in Zip-file: %s\n", pak->pakFilename);
 							return 1;
 						}
 
@@ -1253,7 +1278,7 @@ long FS_FOpenFileReadDir(const char *filename, searchpath_t *search, fileHandle_
 
 		return -1;
 	}
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 	*file = FS_HandleForFileForThread(FsThread);
 
 	if(*file == 0)
@@ -1288,21 +1313,10 @@ long FS_FOpenFileReadDir(const char *filename, searchpath_t *search, fileHandle_
 					// from every pk3 file..
 					len = strlen(filename);
 
-
-					if (!(pak->referenced & FS_GENERAL_REF))
+					if (!(pak->referenced & FS_GENERAL_REF) && !FS_FilesAreLoadedGlobally(filename))
 					{
-						for(testExt = noReferenceExts; *testExt; ++testExt)
-						{
-							if(FS_IsExt(filename, *testExt, len))
-							{
-								break;
-							}
-						}
-						if(*testExt == NULL)
-						{
 							pak->referenced |= FS_GENERAL_REF;
 							FS_AddIwdPureCheckReference(search);
-						}
 					}
 
 					if(uniqueFILE)
@@ -1312,7 +1326,7 @@ long FS_FOpenFileReadDir(const char *filename, searchpath_t *search, fileHandle_
 
 						if(fsh[*file].handleFiles.file.z == NULL)
 						{
-							Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+							Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 							Com_Error(ERR_FATAL, "Couldn't open %s", pak->pakFilename);
 						}
 					}
@@ -1329,11 +1343,11 @@ long FS_FOpenFileReadDir(const char *filename, searchpath_t *search, fileHandle_
 					// open the file in the zip
 					if(unzOpenCurrentFile(fsh[*file].handleFiles.file.z) != UNZ_OK)
 					{
-						Com_PrintError("FS_FOpenFileReadDir: Failed to open Zip-File\n");
+						Com_PrintError(CON_CHANNEL_FILES,"FS_FOpenFileReadDir: Failed to open Zip-File\n");
 					}
 					fsh[*file].zipFilePos = pakFile->pos;
 
-					Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+					Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 					if(fs_debug->integer)
 					{
@@ -1343,7 +1357,7 @@ long FS_FOpenFileReadDir(const char *filename, searchpath_t *search, fileHandle_
 					err = unzGetCurrentFileInfo( fsh[*file].handleFiles.file.z, &file_info, netpath, sizeof( netpath ), NULL, 0, NULL, 0 );
 					if(err != UNZ_OK)
 					{
-						Com_PrintWarning("Read error in Zip-file: %s\n", pak->pakFilename);
+						Com_PrintWarning(CON_CHANNEL_FILES,"Read error in Zip-file: %s\n", pak->pakFilename);
 						return 1;
 					}
 					if(file_info.uncompressed_size)
@@ -1369,7 +1383,7 @@ long FS_FOpenFileReadDir(const char *filename, searchpath_t *search, fileHandle_
 		if (filep == NULL)
 		{
 			*file = 0;
-			Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+			Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 			return -1;
 		}
 
@@ -1383,11 +1397,11 @@ long FS_FOpenFileReadDir(const char *filename, searchpath_t *search, fileHandle_
 
 		fsh[*file].handleFiles.file.o = filep;
 
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 		return FS_fplength(filep);
 	}
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 	return -1;
 }
@@ -1407,7 +1421,7 @@ long FS_FOpenFileReadForThread(const char *filename, fileHandle_t *file, int fsT
 	searchpath_t *search;
 	long len;
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 	if(!FS_Initialized())
 		Com_Error(ERR_FATAL, "Filesystem call made without initialization");
@@ -1420,7 +1434,7 @@ long FS_FOpenFileReadForThread(const char *filename, fileHandle_t *file, int fsT
 	        {
 						if(len > 0)
 						{
-							Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+							Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 							return len;
 						}
 	        }
@@ -1428,13 +1442,13 @@ long FS_FOpenFileReadForThread(const char *filename, fileHandle_t *file, int fsT
 	        {
 						if(len >= 0 && *file)
 						{
-							Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+							Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 							return len;
 						}
 	        }
 	}
 
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 #ifdef FS_MISSING
 	if(missingFiles)
@@ -1473,19 +1487,19 @@ void FS_Path_f( void ) {
 	searchpath_t	*s;
 	int				i;
 
-	Com_Printf ("Current search path:\n");
+	Com_Printf (CON_CHANNEL_DONT_FILTER, "Current search path:\n");
 	for (s = fs_searchpaths; s; s = s->next) {
 		if (s->pack) {
-			Com_Printf ("%s (%i files)\n", s->pack->pakFilename, s->pack->numfiles);
+			Com_Printf (CON_CHANNEL_DONT_FILTER, "%s (%i files)\n", s->pack->pakFilename, s->pack->numfiles);
 		} else {
-			Com_Printf ("%s%c%s\n", s->dir->path, PATH_SEP, s->dir->gamedir );
+			Com_Printf (CON_CHANNEL_DONT_FILTER, "%s%c%s\n", s->dir->path, PATH_SEP, s->dir->gamedir );
 		}
 	}
 
-	Com_Printf( "\n" );
+	Com_Printf(CON_CHANNEL_FILES, "\n" );
 	for ( i = 1 ; i < MAX_FILE_HANDLES ; i++ ) {
 		if ( fsh[i].handleFiles.file.o ) {
-			Com_Printf( "handle %i: %s\n", i, fsh[i].name );
+			Com_Printf(CON_CHANNEL_DONT_FILTER, "handle %i: %s\n", i, fsh[i].name );
 		}
 	}
 }
@@ -1505,13 +1519,13 @@ qboolean FS_Which(const char *filename, void *searchPath)
 	{
 		if(search->pack)
 		{
-			Com_Printf("File \"%s\" found in \"%s\"\n", filename, search->pack->pakFilename);
+			Com_Printf(CON_CHANNEL_FILES,"File \"%s\" found in \"%s\"\n", filename, search->pack->pakFilename);
 			return qtrue;
 		}
 		else if(search->dir)
 		{
 			FS_BuildOSPathForThread(search->dir->path, search->dir->gamedir, filename, netpath, 0);
-			Com_Printf( "File \"%s\" found at \"%s\"\n", filename, netpath);
+			Com_Printf(CON_CHANNEL_FILES, "File \"%s\" found at \"%s\"\n", filename, netpath);
 			return qtrue;
 		}
 	}
@@ -1531,7 +1545,7 @@ void FS_Which_f( void ) {
 	filename = Cmd_Argv(1);
 
 	if ( !filename[0] ) {
-		Com_Printf( "Usage: which <file>\n" );
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "Usage: which <file>\n" );
 		return;
 	}
 
@@ -1547,7 +1561,7 @@ void FS_Which_f( void ) {
 			return;
 	}
 
-	Com_Printf("File not found: \"%s\"\n", filename);
+	Com_Printf(CON_CHANNEL_DONT_FILTER,"File not found: \"%s\"\n", filename);
 	return;
 }
 
@@ -1560,12 +1574,12 @@ FS_Dir_f
 void FS_Dir_f( void ) {
 	char	*path;
 	char	*extension;
-	char	**dirnames;
+	const char	**dirnames;
 	int		ndirs;
 	int		i;
 
 	if ( Cmd_Argc() < 2 || Cmd_Argc() > 3 ) {
-		Com_Printf( "usage: dir <directory> [extension]\n" );
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "usage: dir <directory> [extension]\n" );
 		return;
 	}
 
@@ -1577,13 +1591,13 @@ void FS_Dir_f( void ) {
 		extension = Cmd_Argv( 2 );
 	}
 
-	Com_Printf( "Directory of %s %s\n", path, extension );
-	Com_Printf( "---------------\n" );
+	Com_Printf(CON_CHANNEL_DONT_FILTER, "Directory of %s %s\n", path, extension );
+	Com_Printf(CON_CHANNEL_DONT_FILTER, "---------------\n" );
 
-	dirnames = FS_ListFiles( path, extension, &ndirs );
+	dirnames = FS_ListFiles( path, extension, 0, &ndirs );
 
 	for ( i = 0; i < ndirs; i++ ) {
-		Com_Printf( "%s\n", dirnames[i] );
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "%s\n", dirnames[i] );
 	}
 	FS_FreeFileList( dirnames );
 }
@@ -1659,7 +1673,7 @@ int FS_ReadLine( void *buffer, int len, fileHandle_t f ) {
 	if (read == NULL) {	//Error
 
 		if(feof(fsh[f].handleFiles.file.o)) return 0;
-		Com_PrintError("FS_ReadLine: couldn't read");
+		Com_PrintError(CON_CHANNEL_FILES,"FS_ReadLine: couldn't read");
 		return -1;
 	}
 	return 1;
@@ -1680,18 +1694,22 @@ long FS_SV_FOpenFileRead( const char *filename, fileHandle_t *fp ) {
 	mvabuf;
 
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 
 	if ( !FS_Initialized() ) {
 		Com_Error( ERR_FATAL, "Filesystem call made without initialization" );
 	}
 
+	if(filename == NULL || filename[0] == 0)
+	{
+		return 0;
+	}
 
 	f = FS_HandleForFile();
 	if(f == 0){
 
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return 0;
 	}
 	FS_SetFilenameForHandle(f, filename);
@@ -1727,7 +1745,7 @@ long FS_SV_FOpenFileRead( const char *filename, fileHandle_t *fp ) {
 
 		}
 	}
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 	if ( !fsh[f].handleFiles.file.o ){
 		f = 0;
@@ -1752,7 +1770,7 @@ fileHandle_t FS_SV_FOpenFileAppend( const char *filename ) {
 	fileHandle_t	f;
 	mvabuf;
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 
 	if ( !FS_Initialized() ) {
@@ -1761,7 +1779,7 @@ fileHandle_t FS_SV_FOpenFileAppend( const char *filename ) {
 
 	f = FS_HandleForFile();
 	if(f == 0){
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return 0;
 	}
 	FS_SetFilenameForHandle(f, filename);
@@ -1777,14 +1795,14 @@ fileHandle_t FS_SV_FOpenFileAppend( const char *filename ) {
 	}
 
 	if( FS_CreatePath( ospath ) ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return 0;
 	}
 
 	fsh[f].handleFiles.file.o = fopen( ospath, "ab" );
 	fsh[f].handleSync = qfalse;
 
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 	if (!fsh[f].handleFiles.file.o) {
 		f = 0;
@@ -1905,13 +1923,13 @@ int FS_Write( const void *buffer, int len, fileHandle_t h ) {
 			if (!tries) {
 				tries = 1;
 			} else {
-				Com_Printf( "FS_Write: 0 bytes written\n" );
+				Com_Printf(CON_CHANNEL_FILES, "FS_Write: 0 bytes written\n" );
 				return 0;
 			}
 		}
 
 		if (written == -1) {
-			Com_Printf( "FS_Write: -1 bytes written\n" );
+			Com_Printf(CON_CHANNEL_FILES, "FS_Write: -1 bytes written\n" );
 			return 0;
 		}
 
@@ -2047,7 +2065,7 @@ int FS_WriteFile( const char *qpath, const void *buffer, int size ) {
 
 	f = FS_FOpenFileWrite( qpath );
 	if ( !f ) {
-		Com_Printf( "Failed to open %s\n", qpath );
+		Com_Printf(CON_CHANNEL_FILES, "Failed to open %s\n", qpath );
 		return -1;
 	}
 
@@ -2094,7 +2112,7 @@ int FS_WriteFileOSPath(char *ospath, const void *buffer, int size ) {
 
 	fh = fopen( ospath, "wb" );
 	if ( !fh ) {
-		Com_Printf( "Failed to open %s\n", ospath );
+		Com_Printf(CON_CHANNEL_FILES, "Failed to open %s\n", ospath );
 		return -1;
 	}
 
@@ -2110,13 +2128,13 @@ int FS_WriteFileOSPath(char *ospath, const void *buffer, int size ) {
 			if (!tries) {
 				tries = 1;
 			} else {
-				Com_Printf( "FS_WriteFileOSPath: 0 bytes written\n" );
+				Com_Printf(CON_CHANNEL_FILES, "FS_WriteFileOSPath: 0 bytes written\n" );
 				return 0;
 			}
 		}
 
 		if (written == -1) {
-			Com_Printf( "FS_WriteFileOSPath: -1 bytes written\n" );
+			Com_Printf(CON_CHANNEL_FILES, "FS_WriteFileOSPath: -1 bytes written\n" );
 			return 0;
 		}
 
@@ -2152,11 +2170,11 @@ static fileHandle_t FS_SV_FOpenFileWriteGeneric( const char *filename, const cha
 	FS_BuildOSPathForThread( basepath, filename, "", ospath, 0 );
 	FS_StripTrailingSeperator( ospath );
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 	f = FS_HandleForFile();
 	if(f == 0){
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return 0;
 	}
 	FS_SetFilenameForHandle(f, filename);
@@ -2167,14 +2185,14 @@ static fileHandle_t FS_SV_FOpenFileWriteGeneric( const char *filename, const cha
 	}
 
 	if( FS_CreatePath( ospath ) ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return 0;
 	}
 
 	fsh[f].handleFiles.file.o = fopen( ospath, "wb" );
 	fsh[f].handleSync = qfalse;
 
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 	if (!fsh[f].handleFiles.file.o) {
 		f = 0;
@@ -2212,7 +2230,7 @@ static int FS_SV_WriteFileGeneric( const char *qpath, const void *buffer, int si
 
 	f = FS_SV_FOpenFileWriteGeneric( qpath, basepath );
 	if ( !f ) {
-		Com_Printf( "Failed to open %s\n", qpath );
+		Com_Printf(CON_CHANNEL_FILES, "Failed to open %s\n", qpath );
 		return -1;
 	}
 
@@ -2290,7 +2308,7 @@ int FS_Seek( fileHandle_t f, long offset, int origin ) {
 				unzSetOffset(fsh[f].handleFiles.file.z, fsh[f].zipFilePos);
 				if(unzOpenCurrentFile(fsh[f].handleFiles.file.z) != UNZ_OK)
 				{
-					Com_PrintError("FS_Seek: Failed to open zipfile\n");
+					Com_PrintError(CON_CHANNEL_FILES,"FS_Seek: Failed to open zipfile\n");
 					return -1;
 				}
 				//fallthrough
@@ -2368,11 +2386,11 @@ void FS_SV_HomeCopyFile( char *from, char *to ) {
 		Sys_Print(va("FS_SVHomeCopyFile: %s --> %s\n", from_ospath, to_ospath ));
 	}
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 	f = fopen( from_ospath, "rb" );
 	if ( !f ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return;
 	}
 	fseek (f, 0, SEEK_END);
@@ -2387,20 +2405,20 @@ void FS_SV_HomeCopyFile( char *from, char *to ) {
 	fclose( f );
 
 	if( FS_CreatePath( to_ospath ) ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return;
 	}
 
 	f = fopen( to_ospath, "wb" );
 	if ( !f ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return;
 	}
 	if (fwrite( buf, 1, len, f ) != len)
 		Com_Error( ERR_FATAL, "Short write in FS_Copyfiles()\n" );
 	fclose( f );
 	free( buf );
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 }
 
@@ -2414,9 +2432,9 @@ qboolean FS_VerifyPak( const char *pak ) {
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
 		if ( search->pack ) {
 			Q_strncpyz( teststring, search->pack->pakGamename, sizeof( teststring ) );
-			Q_strcat( teststring, sizeof( teststring ), "/" );
-			Q_strcat( teststring, sizeof( teststring ), search->pack->pakBasename );
-			Q_strcat( teststring, sizeof( teststring ), ".iwd" );
+			Q_strncat( teststring, sizeof( teststring ), "/" );
+			Q_strncat( teststring, sizeof( teststring ), search->pack->pakBasename );
+			Q_strncat( teststring, sizeof( teststring ), ".iwd" );
 			if ( !Q_stricmp( teststring, pak ) ) {
 				return qtrue;
 			}
@@ -2424,7 +2442,28 @@ qboolean FS_VerifyPak( const char *pak ) {
 		}
 
 	}
+	
 	Com_sprintf(teststring, sizeof( teststring ), "%s/mod.ff", fs_gameDirVar->string);
+	if ( !Q_stricmp( teststring, pak ) ){
+		return qtrue;
+	}
+
+	Com_sprintf(teststring, sizeof( teststring ), "%s/common_mp.ff", fs_gameDirVar->string);
+	if ( !Q_stricmp( teststring, pak ) ){
+		return qtrue;
+	}
+
+	Com_sprintf(teststring, sizeof( teststring ), "%s/localized_common_mp.ff", fs_gameDirVar->string);
+	if ( !Q_stricmp( teststring, pak ) ){
+		return qtrue;
+	}
+
+	Com_sprintf(teststring, sizeof( teststring ), "%s/code_post_gfx_mp.ff", fs_gameDirVar->string);
+	if ( !Q_stricmp( teststring, pak ) ){
+		return qtrue;
+	}
+
+	Com_sprintf(teststring, sizeof( teststring ), "%s/localized_code_post_gfx_mp.ff", fs_gameDirVar->string);
 	if ( !Q_stricmp( teststring, pak ) ){
 		return qtrue;
 	}
@@ -2530,7 +2569,7 @@ static pack_t *FS_LoadZipFile( char *zipfile, const char *basename ) {
 
 	pack->handle = uf;
 	pack->numfiles = gi.number_entry;
-	pack->unk1 = 0;
+	pack->hasOpenFile = 0;
 	unzGoToFirstFile( uf );
 
 	for ( i = 0; i < gi.number_entry; i++ )
@@ -2573,31 +2612,80 @@ static pack_t *FS_LoadZipFile( char *zipfile, const char *basename ) {
 }
 
 
-
-
-
-
-void FS_CopyCvars()
+void FS_InitLocalizedIwdPureChecksums()
 {
-    //SEH
-    *(cvar_t**)0x13f9a1e0 = loc_language;
-    *(cvar_t**)0x13f9a1e4 = loc_forceEnglish;
-    *(cvar_t**)0x13f9a1e8 = loc_translate;
-    *(cvar_t**)0x13f9a1ec = loc_warnings;
-    *(cvar_t**)0x13f9a1f0 = loc_warningsAsErrors;
-    //FS
-    *(cvar_t**)0x13f9da00 = fs_debug;
-    *(cvar_t**)0x13f9da14 = fs_copyfiles;
-    *(cvar_t**)0x13f9da10 = fs_cdpath;
-    *(cvar_t**)0x13f9da08 = fs_basepath;
-    *(cvar_t**)0x13f9da0C = fs_basegame;
-    *(cvar_t**)0x13f9da18 = fs_gameDirVar;
-    *(cvar_t**)0x13f9da24 = fs_ignoreLocalized;
-    *(cvar_t**)0x13f9da04 = fs_homepath;
-    *(cvar_t**)0x13f9da1C = fs_restrict;
-    *(cvar_t**)0x13f9da20 = fs_usedevdir;
+    int i;
+    fileHandle_t fh;
+    int len;
+    char filebuffer[0x4000];
+
+    const char** checksumheaderfiles = FS_ListFilesInPackDirectory("addiwdheaders");
+    if(checksumheaderfiles == NULL)
+    {
+        Cvar_Set2("sv_pure", "0", qfalse);
+        return;
+    }
+
+    for(i = 0; checksumheaderfiles[i] != NULL; ++i);
+
+    if(i == 0)
+    {
+        Z_Free(checksumheaderfiles);
+        Cvar_Set2("sv_pure", "0", qfalse);
+        return;
+    }
+
+    fs_additionalPureChecksums = Z_Malloc(sizeof(int) * i);
+    if(fs_additionalPureChecksums == NULL)
+    {
+        Z_Free(checksumheaderfiles);
+        Cvar_Set2("sv_pure", "0", qfalse);
+        return;
+    }
+
+    fs_additionalPureChecksumCount = i;
+    for(i = 0; i < fs_additionalPureChecksumCount; ++i)
+    {
+        len = FS_FOpenFileRead(checksumheaderfiles[i], &fh);
+        if(len > 0 && len < sizeof(filebuffer))
+        {
+            int readlen;
+            if((readlen = FS_Read(filebuffer, len, fh)) > 0 && readlen % 4 == 0)
+            {
+                int sum = Com_BlockChecksumKey32( filebuffer, readlen, LittleLong( fs_checksumFeed ) );
+                fs_additionalPureChecksums[i] = LittleLong( sum );
+//                Com_Printf(CON_CHANNEL_FILES, "^6Adding checksum for %s\n", checksumheaderfiles[i]);
+            }
+        }
+        if(len >= 0)
+        {
+            FS_FCloseFile(fh);
+        }
+    }
+
+    Z_Free(checksumheaderfiles);
 }
 
+
+const char *__cdecl FS_LoadedIwdPureChecksums(char* info4, int len)
+{
+  struct searchpath_s *search;
+  int i;
+
+  info4[0] = 0;
+  for ( search = fs_searchpaths; search; search = search->next )
+  {
+    if ( search->pack && !search->localized)
+    {
+        Q_strncat(info4, len, va("%i ", search->pack->pure_checksum));
+    }
+  }
+  for ( i = 0; i < fs_additionalPureChecksumCount; ++i )
+  {
+    Q_strncat(info4, len, va("%i ", fs_additionalPureChecksums[i]));
+  }
+  return info4;
+}
 
 void SEH_InitLanguage()
 {
@@ -2613,13 +2701,6 @@ void SEH_InitLanguage()
 
 void FS_InitFilesystem()
 {
-  Com_StartupVariable("fs_cdpath");
-  Com_StartupVariable("fs_basepath");
-  Com_StartupVariable("fs_homepath");
-  Com_StartupVariable("fs_game");
-  Com_StartupVariable("fs_copyfiles");
-  Com_StartupVariable("fs_restrict");
-  Com_StartupVariable("loc_language");
   SEH_InitLanguage();
   FS_Startup(BASEGAME);
 //  _Z17SEH_Init_StringEdv();
@@ -2630,6 +2711,10 @@ void FS_InitFilesystem()
   Q_strncpyz(lastValidBase, fs_basepath->string, sizeof(lastValidBase));
   Q_strncpyz(lastValidGame, fs_gameDirVar->string, sizeof(lastValidGame));
 
+/*
+  char info[8192];
+  Com_Printf(CON_CHANNEL_FILES, "Valid IWD checksums: %s\n", FS_LoadedIwdPureChecksums(info, 8192));
+*/
 }
 
 
@@ -2658,7 +2743,7 @@ void FS_GameCheckDir(cvar_t *var)
 {
   if ( !FS_GameDirDomainFunc(var->name, var->string))
   {
-    Com_Printf("'%s' is not a valid value for dvar '%s'\n\n", Cvar_DisplayableValue(var), var->name);
+    Com_Printf(CON_CHANNEL_FILES,"'%s' is not a valid value for dvar '%s'\n\n", Cvar_DisplayableValue(var), var->name);
     Cvar_SetString(var, var->resetString);
   }
 }
@@ -2714,7 +2799,7 @@ void FS_AddGameDirectory(const char *path, const char *dir)
 
   FS_AddGameDirectory_Single(path, dir, 0, 0);
 }
-
+//Existing languages english, french, german, italian, spanish, russian, polish, chinese
 static char* g_languages[] = {"english", "french", "german", "italian",
                               "spanish", "british", "russian", "polish",
                               "korean", "taiwanese", "japanese", "chinese",
@@ -2786,84 +2871,97 @@ void FS_ShutdownSearchpath(searchpath_t *clear)
 	}
 }
 
-
-
 void FS_DisplayPath( void ) {
 	searchpath_t    *s;
 	int i;
 
-	Com_Printf("Current language: %s\n", SEH_GetLanguageName(SEH_GetCurrentLanguage()));
-	Com_Printf("Current fs_basepath: %s\n", fs_basepath->string);
-	Com_Printf("Current fs_homepath: %s\n", fs_homepath->string);
+	Com_Printf(CON_CHANNEL_FILES,"Current language: %s\n", SEH_GetLanguageName(SEH_GetCurrentLanguage()));
+	Com_Printf(CON_CHANNEL_FILES,"Current fs_basepath: %s\n", fs_basepath->string);
+	Com_Printf(CON_CHANNEL_FILES,"Current fs_homepath: %s\n", fs_homepath->string);
 	if ( fs_ignoreLocalized->integer)
-		Com_Printf("    localized assets are being ignored\n");
+		Com_Printf(CON_CHANNEL_FILES,"    localized assets are being ignored\n");
 
-	Com_Printf( "Current search path:\n" );
+	Com_Printf(CON_CHANNEL_FILES, "Current search path:\n" );
 	for ( s = fs_searchpaths; s; s = s->next )
 	{
 		if ( s->pack )
 		{
-			Com_Printf( "%s (%i files)\n", s->pack->pakFilename, s->pack->numfiles );
+			Com_Printf(CON_CHANNEL_FILES, "%s (%i files)\n", s->pack->pakFilename, s->pack->numfiles );
 			if ( s->localized )
 			{
-			    Com_Printf("    localized assets iwd file for %s\n", SEH_GetLanguageName(s->langIndex));
+			    Com_Printf(CON_CHANNEL_FILES,"    localized assets iwd file for %s\n", SEH_GetLanguageName(s->langIndex));
 			}
 //			if ( fs_numServerPaks ) {
 //				if ( !FS_PakIsPure( s->pack ) ) {
-//					Com_Printf( "    not on the pure list\n" );
+//					Com_Printf(CON_CHANNEL_FILES, "    not on the pure list\n" );
 //				} else {
-//					Com_Printf( "    on the pure list\n" );
+//					Com_Printf(CON_CHANNEL_FILES, "    on the pure list\n" );
 //				}
 //			}
 		} else {
-			Com_Printf( "%s/%s\n", s->dir->path, s->dir->gamedir );
+			Com_Printf(CON_CHANNEL_FILES, "%s/%s\n", s->dir->path, s->dir->gamedir );
 			if ( s->localized )
 			{
-				Com_Printf("    localized assets game folder for %s\n", SEH_GetLanguageName(s->langIndex));
+				Com_Printf(CON_CHANNEL_FILES,"    localized assets game folder for %s\n", SEH_GetLanguageName(s->langIndex));
 			}
 		}
 	}
-	Com_Printf("\nFile Handles:\n");
+	Com_Printf(CON_CHANNEL_FILES,"\nFile Handles:\n");
 	for ( i = 1 ; i < MAX_FILE_HANDLES ; i++ ) {
 		if ( fsh[i].handleFiles.file.o ) {
-			Com_Printf( "handle %i: %s\n", i, fsh[i].name );
+			Com_Printf(CON_CHANNEL_FILES, "handle %i: %s\n", i, fsh[i].name );
 		}
 	}
 }
 
-void FS_Startup(const char *gameName)
+void FS_InitCvars()
 {
-
     char *homePath;
-    cvar_t *levelname;
-    mvabuf;
 
-    Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Com_StartupVariable("fs_cdpath");
+	Com_StartupVariable("fs_basepath");
+	Com_StartupVariable("fs_homepath");
+	Com_StartupVariable("fs_game");
+	Com_StartupVariable("fs_copyfiles");
+	Com_StartupVariable("fs_restrict");
+	Com_StartupVariable("loc_language");
 
-    Com_Printf("----- FS_Startup -----\n");
-    fs_debug = Cvar_RegisterInt("fs_debug", 0, 0, 2, 0, "Enable file system debugging information");
-    fs_copyfiles = Cvar_RegisterBool("fs_copyfiles", 0, 16, "Copy all used files to another location");
     fs_cdpath = Cvar_RegisterString("fs_cdpath", Sys_DefaultCDPath(), 16, "CD path");
     fs_basepath = Cvar_RegisterString("fs_basepath", Sys_DefaultInstallPath(), 528, "Base game path");
     fs_basegame = Cvar_RegisterString("fs_basegame", "", 16, "Base game name");
     fs_gameDirVar = Cvar_RegisterString("fs_game", "", 28, "Game data directory. Must be \"\" or a sub directory of 'mods/'.");
-    fs_ignoreLocalized = Cvar_RegisterBool("fs_ignoreLocalized", qfalse, 160, "Ignore localized files");
-
-    fs_packFiles = 0;
-
     homePath = (char *)Sys_DefaultHomePath();
     if (!homePath || !homePath[0])
-        homePath = fs_basepath->resetString;
+        homePath = Sys_Cwd();
     fs_homepath = Cvar_RegisterString("fs_homepath", homePath, 528, "Game home path");
-    fs_restrict = Cvar_RegisterBool("fs_restrict", qfalse, 16, "Restrict file access for demos etc.");
-    fs_usedevdir = Cvar_RegisterBool("fs_usedevdir", qfalse, 16, "Use development directories.");
-
-    levelname = Cvar_FindVar("mapname");
 
     FS_SetDirSep(fs_homepath);
     FS_SetDirSep(fs_basepath);
     FS_SetDirSep(fs_gameDirVar);
     FS_GameCheckDir(fs_gameDirVar);
+
+    fs_debug = Cvar_RegisterInt("fs_debug", 0, 0, 2, 0, "Enable file system debugging information");
+    fs_copyfiles = Cvar_RegisterBool("fs_copyfiles", 0, 16, "Copy all used files to another location");
+    fs_ignoreLocalized = Cvar_RegisterBool("fs_ignoreLocalized", qfalse, 160, "Ignore localized files");
+    fs_restrict = Cvar_RegisterBool("fs_restrict", qfalse, 16, "Restrict file access for demos etc.");
+    fs_usedevdir = Cvar_RegisterBool("fs_usedevdir", qfalse, 16, "Use development directories.");
+
+}
+
+void FS_Startup(const char *gameName)
+{
+    cvar_t *levelname;
+    mvabuf;
+
+    Com_Printf(CON_CHANNEL_FILES,"----- FS_Startup -----\n");
+
+    Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
+
+    fs_packFiles = 0;
+
+    FS_InitCvars();
+
+    levelname = Cvar_FindVar("mapname");
 
     if (fs_basepath->string[0])
     {
@@ -2943,7 +3041,7 @@ void FS_Startup(const char *gameName)
         if (fs_homepath->string[0] && Q_stricmp(fs_homepath->string, fs_basepath->string))
             FS_AddGameDirectory(fs_homepath->string, fs_gameDirVar->string);
     }
-
+    FS_InitLocalizedIwdPureChecksums();
     /*  Com_ReadCDKey(); */
     Cmd_AddCommand("path", FS_Path_f);
     Cmd_AddCommand("which", FS_Which_f);
@@ -2951,10 +3049,10 @@ void FS_Startup(const char *gameName)
     FS_DisplayPath();
     /*  Cvar_ClearModified(fs_gameDirVar);*/
     fs_gameDirVar->modified = 0;
-    Com_Printf("----------------------\n");
-    Com_Printf("%d files in iwd files\n", fs_packFiles);
+    Com_Printf(CON_CHANNEL_FILES,"----------------------\n");
+    Com_Printf(CON_CHANNEL_FILES,"%d files in iwd files\n", fs_packFiles);
 
-    Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+    Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
     PHandler_Event(PLUGINS_ONFSSTARTED, fs_searchpaths);
 }
@@ -2982,7 +3080,7 @@ void FS_AddGameDirectory_Single(const char *path, const char *dir_nolocal, qbool
 		Q_strncpyz(dir, dir_nolocal, sizeof(dir));
 	}
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 	for (sp = fs_searchpaths ; sp ; sp = sp->next)
 	{
@@ -2993,12 +3091,12 @@ void FS_AddGameDirectory_Single(const char *path, const char *dir_nolocal, qbool
 				localization = "localized";
 				if ( !sp->localized )
 					localization = "non-localized";
-				Com_PrintWarning("WARNING: game folder %s/%s added as both localized & non-localized. Using folder as %s\n", path, dir, localization);
+				Com_PrintWarning(CON_CHANNEL_FILES,"WARNING: game folder %s/%s added as both localized & non-localized. Using folder as %s\n", path, dir, localization);
 			}
 			if ( sp->localized && index != sp->localized )
-				Com_PrintWarning( "WARNING: game folder %s/%s re-added as localized folder with different language\n", path, dir);
+				Com_PrintWarning(CON_CHANNEL_FILES, "WARNING: game folder %s/%s re-added as localized folder with different language\n", path, dir);
 
-			Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+			Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 			return;
 		}
 	}
@@ -3011,7 +3109,7 @@ void FS_AddGameDirectory_Single(const char *path, const char *dir_nolocal, qbool
           ospath[strlen(ospath) -1] = 0;
 		if ( !Sys_DirectoryHasContent(ospath) )
 		{
-			Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+			Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 			return;
 		}
     }
@@ -3019,7 +3117,7 @@ void FS_AddGameDirectory_Single(const char *path, const char *dir_nolocal, qbool
     {
       Q_strncpyz(fs_gamedir, dir, 256);
     }
-    search = (searchpath_t *)Z_Malloc(sizeof(searchpath_t));
+    search = (searchpath_t *)S_Malloc(sizeof(searchpath_t));
     search->dir = (directory_t *)Z_Malloc(sizeof(directory_t));
     Q_strncpyz(search->dir->path, path, sizeof(search->dir->path));
     Q_strncpyz(search->dir->gamedir, dir, sizeof(search->dir->gamedir));
@@ -3042,7 +3140,7 @@ void FS_AddGameDirectory_Single(const char *path, const char *dir_nolocal, qbool
     prev->next = search;
     FS_AddIwdFilesForGameDirectory(path, dir);
 
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 }
 
@@ -3118,7 +3216,7 @@ void FS_AddIwdFilesForGameDirectory(const char *path, const char *dir)
 
   if ( numfiles > MAX_PAKFILES )
   {
-    Com_PrintWarning("WARNING: Exceeded max number of iwd files in %s/%s (%1/%1)\n", path, dir, numfiles, MAX_PAKFILES);
+    Com_PrintWarning(CON_CHANNEL_FILES,"WARNING: Exceeded max number of iwd files in %s/%s (%1/%1)\n", path, dir, numfiles, MAX_PAKFILES);
     numfiles = MAX_PAKFILES;
   }
   if ( !numfiles && !Q_stricmp(dir, BASEGAME) && !Q_stricmp(path, fs_basepath->string) )
@@ -3148,18 +3246,18 @@ void FS_AddIwdFilesForGameDirectory(const char *path, const char *dir)
 			language = sub_55D700(sorted[i]);
 			if ( !language[0] )
 			{
-				Com_PrintWarning("WARNING: Localized assets iwd file %s/%s/%s has invalid name (no language specified). Proper naming convention is: localized_[language]_iwd#.iwd\n", path, dir, sorted[i]);
+				Com_PrintWarning(CON_CHANNEL_FILES,"WARNING: Localized assets iwd file %s/%s/%s has invalid name (no language specified). Proper naming convention is: localized_[language]_iwd#.iwd\n", path, dir, sorted[i]);
 				continue;
 			}
 			if ( !SEH_GetLanguageIndexForName(language, &langindex))
 			{
-				Com_PrintWarning("WARNING: Localized assets iwd file %s/%s/%s has invalid name (bad language name specified). Proper naming convention is: localized_[language]_iwd#.iwd\n", path, dir, sorted[i]);
+				Com_PrintWarning(CON_CHANNEL_FILES,"WARNING: Localized assets iwd file %s/%s/%s has invalid name (bad language name specified). Proper naming convention is: localized_[language]_iwd#.iwd\n", path, dir, sorted[i]);
 			  if ( !languagesListed )
 			  {
-				Com_Printf("Supported languages are:\n");
+				Com_Printf(CON_CHANNEL_FILES,"Supported languages are:\n");
 				for(j = 0; j < 15; j++)
 				{
-					Com_Printf("    %s\n", SEH_GetLanguageName(j));
+					Com_Printf(CON_CHANNEL_FILES,"    %s\n", SEH_GetLanguageName(j));
 				}
 				languagesListed = 1;
 			  }
@@ -3167,9 +3265,9 @@ void FS_AddIwdFilesForGameDirectory(const char *path, const char *dir)
 			}
 			islocalized = qtrue;
 		}else{
-		    if ( !Q_stricmp(dir, BASEGAME) && !Q_stricmp(path, fs_basepath->string) && Q_stricmpn(sorted[i], "iw_", 3) && Q_stricmpn(sorted[i], "xbase_", 6))
+		    if ( !Q_stricmp(dir, BASEGAME) && !Q_stricmp(path, fs_basepath->string) && Q_stricmpn(sorted[i], "iw_", 3) && Q_stricmpn(sorted[i], "jcod4x_", 7) && Q_stricmpn(sorted[i], "xbase_", 6))
 			{
-				Com_PrintWarning("WARNING: Invalid IWD %s in \\main.\n", sorted[i]);
+				Com_PrintWarning(CON_CHANNEL_FILES,"WARNING: Invalid IWD %s in \\main.\n", sorted[i]);
 				continue;
 			}
 			islocalized = qfalse;
@@ -3194,7 +3292,7 @@ void FS_AddIwdFilesForGameDirectory(const char *path, const char *dir)
 
 		Q_strncpyz(pak->pakGamename, dir, sizeof(pak->pakGamename));
 
-		search = (searchpath_t *)Z_Malloc(sizeof(searchpath_t));
+		search = (searchpath_t *)S_Malloc(sizeof(searchpath_t));
 		search->pack = pak;
 		search->localized = islocalized;
 		search->langIndex = langindex;
@@ -3213,7 +3311,8 @@ void FS_AddIwdFilesForGameDirectory(const char *path, const char *dir)
 		search->next = sp;
 		prev->next = search;
 	}
-/*	Sys_FreeFileList(sorted); */
+
+	Sys_FreeFileList(pakfiles);
 }
 
 
@@ -3240,235 +3339,18 @@ unsigned Com_BlockChecksumKey32(void* buffer, int length, int key)
 
 
 
-
-
-
-
-void FS_PatchFileHandleData()
+void __cdecl FS_AddUserMapDirIWDs(const char *pszGameFolder)
 {
-	/* Copy the our fsh handle */
-	*(fileHandleData_t**)0x8128977 = fsh;
-	*(fileHandleData_t**)0x81289FA = fsh;
-	*(fileHandleData_t**)0x8128A66 = fsh;
-	*(fileHandleData_t**)0x8128AED = fsh;
-	*(fileHandleData_t**)0x8128E8C = fsh;
-	*(fileHandleData_t**)0x8128EC0 = fsh;
-	*(fileHandleData_t**)0x81865A3 = fsh;
-	*(fileHandleData_t**)0x8186955 = fsh;
-	*(fileHandleData_t**)0x8186963 = fsh;
-	*(fileHandleData_t**)0x8186A02 = fsh;
-	*(fileHandleData_t**)0x8186EE2 = fsh;
-	*(fileHandleData_t**)0x8186FA5 = fsh;
-	*(fileHandleData_t**)0x8186FBB = fsh;
-	*(fileHandleData_t**)0x81870E8 = fsh;
-	*(fileHandleData_t**)0x81870F4 = fsh;
-	*(fileHandleData_t**)0x8187299 = fsh;
-	*(fileHandleData_t**)0x81872DA = fsh;
-	*(fileHandleData_t**)0x8187304 = fsh;
-	*(fileHandleData_t**)0x818731B = fsh;
-	*(fileHandleData_t**)0x818732C = fsh;
-	*(fileHandleData_t**)0x8187451 = fsh;
-	*(fileHandleData_t**)0x818747E = fsh;
-	*(fileHandleData_t**)0x818748E = fsh;
-	*(fileHandleData_t**)0x8187619 = fsh;
-	*(fileHandleData_t**)0x8187627 = fsh;
-	*(fileHandleData_t**)0x818765C = fsh;
-	*(fileHandleData_t**)0x818768E = fsh;
-	*(fileHandleData_t**)0x81876BC = fsh;
-	*(fileHandleData_t**)0x8187703 = fsh;
-	*(fileHandleData_t**)0x8187733 = fsh;
-	*(fileHandleData_t**)0x8187741 = fsh;
-	*(fileHandleData_t**)0x818775D = fsh;
-	*(fileHandleData_t**)0x8187775 = fsh;
-	*(fileHandleData_t**)0x8187797 = fsh;
-	*(fileHandleData_t**)0x81877A8 = fsh;
-	*(fileHandleData_t**)0x81877E4 = fsh;
-	*(fileHandleData_t**)0x81877F8 = fsh;
-	*(fileHandleData_t**)0x818780B = fsh;
-	*(fileHandleData_t**)0x818782B = fsh;
-	*(fileHandleData_t**)0x818783C = fsh;
-	*(fileHandleData_t**)0x8188DFD = fsh;
-	*(fileHandleData_t**)0x8188E98 = fsh;
-	*(fileHandleData_t**)0x818A21C = fsh;
-	*(fileHandleData_t**)0x818A22A = fsh;
-	*(fileHandleData_t**)0x818A2D2 = fsh;
-	*(fileHandleData_t**)0x818A350 = fsh;
-	*(fileHandleData_t**)0x818A47F = fsh;
-	*(fileHandleData_t**)0x818A5BF = fsh;
-	*(fileHandleData_t**)0x818A71C = fsh;
-	*(fileHandleData_t**)0x818A72A = fsh;
-	*(fileHandleData_t**)0x818A7CB = fsh;
-	*(fileHandleData_t**)0x818A950 = fsh;
-	*(fileHandleData_t**)0x818AB46 = fsh;
-	*(fileHandleData_t**)0x818AB75 = fsh;
-	*(fileHandleData_t**)0x818ACF0 = fsh;
-	*(fileHandleData_t**)0x818ACFE = fsh;
-	*(fileHandleData_t**)0x818ADA6 = fsh;
-	*(fileHandleData_t**)0x818B0D0 = fsh;
-	*(fileHandleData_t**)0x818B0E7 = fsh;
-	*(fileHandleData_t**)0x818B1C0 = fsh;
-	*(fileHandleData_t**)0x818B233 = fsh;
-	*(fileHandleData_t**)0x818B28C = fsh;
-	*(fileHandleData_t**)0x818B2ED = fsh;
-	*(fileHandleData_t**)0x818B4A6 = fsh;
-	*(fileHandleData_t**)0x818B4BD = fsh;
-	*(fileHandleData_t**)0x818B8FF = fsh;
-	*(fileHandleData_t**)0x818BC49 = fsh;
-	*(fileHandleData_t**)0x818BC5A = fsh;
-	*(fileHandleData_t**)0x818BDE8 = fsh;
+  struct searchpath_s *i;
 
-	*(qboolean**)0x8187288 = &fsh[0].handleFiles.unique;
-	*(qboolean**)0x81872A7 = &fsh[0].handleFiles.unique;
-	*(qboolean**)0x818B212 = &fsh[0].handleFiles.unique;
-	*(qboolean**)0x818B479 = &fsh[0].handleFiles.unique;
-
-	*(qboolean**)0x812897E = &fsh[0].handleSync;
-	*(qboolean**)0x8128A6D = &fsh[0].handleSync;
-	*(qboolean**)0x8128AF4 = &fsh[0].handleSync;
-	*(qboolean**)0x8128EB5 = &fsh[0].handleSync;
-	*(qboolean**)0x8186F49 = &fsh[0].handleSync;
-	*(qboolean**)0x8188E5F = &fsh[0].handleSync;
-	*(qboolean**)0x8188EFF = &fsh[0].handleSync;
-	*(qboolean**)0x818A376 = &fsh[0].handleSync;
-	*(qboolean**)0x818A55C = &fsh[0].handleSync;
-	*(qboolean**)0x818A69C = &fsh[0].handleSync;
-	*(qboolean**)0x818A957 = &fsh[0].handleSync;
-	*(qboolean**)0x818AB6A = &fsh[0].handleSync;
-	*(qboolean**)0x818BB1C = &fsh[0].handleSync;
-	*(qboolean**)0x818BE0B = &fsh[0].handleSync;
-
-	*(int**)0x818BAF6 = &fsh[0].fileSize;
-
-	*(int**)0x818760F = &fsh[0].zipFilePos;
-	*(int**)0x8187729 = &fsh[0].zipFilePos;
-	*(int**)0x818778D = &fsh[0].zipFilePos;
-	*(int**)0x8187821 = &fsh[0].zipFilePos;
-	*(int**)0x818B314 = &fsh[0].zipFilePos;
-
-	*(qboolean**)0x81288ED = &fsh[0].zipFile;
-	*(qboolean**)0x8128E36 = &fsh[0].zipFile;
-	*(qboolean**)0x8186F91 = &fsh[0].zipFile;
-	*(qboolean**)0x81870DD = &fsh[0].zipFile;
-	*(qboolean**)0x8187473 = &fsh[0].zipFile;
-	*(qboolean**)0x81875E8 = &fsh[0].zipFile;
-	*(qboolean**)0x818767F = &fsh[0].zipFile;
-	*(qboolean**)0x81876AD = &fsh[0].zipFile;
-	*(qboolean**)0x818774F = &fsh[0].zipFile;
-	*(qboolean**)0x818A33F = &fsh[0].zipFile;
-	*(qboolean**)0x818A829 = &fsh[0].zipFile;
-	*(qboolean**)0x818A9A6 = &fsh[0].zipFile;
-	*(qboolean**)0x818B147 = &fsh[0].zipFile;
-	*(qboolean**)0x818B1B1 = &fsh[0].zipFile;
-	*(qboolean**)0x818B27B = &fsh[0].zipFile;
-	*(qboolean**)0x818BC33 = &fsh[0].zipFile;
-	*(qboolean**)0x818BDD7 = &fsh[0].zipFile;
-
-	*(qboolean**)0x818BB07 = &fsh[0].streamed;
-
-	*(char**)0x8128905 = fsh[0].name;
-	*(char**)0x8128EA6 = fsh[0].name;
-	*(char**)0x8186A0C = fsh[0].name;
-	*(char**)0x818A2DC = fsh[0].name;
-	*(char**)0x818A367 = fsh[0].name;
-	*(char**)0x818A7D5 = fsh[0].name;
-	*(char**)0x818A841 = fsh[0].name;
-	*(char**)0x818AB5B = fsh[0].name;
-	*(char**)0x818ADB0 = fsh[0].name;
-	*(char**)0x818B128 = fsh[0].name;
-	*(char**)0x818B256 = fsh[0].name;
-	*(char**)0x818BDFC = fsh[0].name;
-
-	/* 2nd element of fsh */
-
-	*(fileHandleData_t**)0x81869A0 = &fsh[1];
-	*(fileHandleData_t**)0x8187B9E = &fsh[1];
-	*(fileHandleData_t**)0x818A26D = &fsh[1];
-	*(fileHandleData_t**)0x818A766 = &fsh[1];
-	*(fileHandleData_t**)0x818A993 = &fsh[1];
-	*(fileHandleData_t**)0x818AA47 = &fsh[1];
-	*(fileHandleData_t**)0x818AA97 = &fsh[1];
-	*(fileHandleData_t**)0x818AD41 = &fsh[1];
-	*(fileHandleData_t**)0x818BDC0 = &fsh[1];
-	*(fileHandleData_t**)0x818BE4B = &fsh[1];
-	*(fileHandleData_t**)0x818BE9B = &fsh[1];
-
-	*(int**)0x8187360 = &fsh[1].fileSize;
-	*(int**)0x818E766 = &fsh[1].fileSize;
-
-	*(int**)0x818699A = &fsh[1].zipFilePos;
-	*(int**)0x8187B98 = &fsh[1].zipFilePos;
-	*(int**)0x818A267 = &fsh[1].zipFilePos;
-	*(int**)0x818A760 = &fsh[1].zipFilePos;
-	*(int**)0x818AA41 = &fsh[1].zipFilePos;
-	*(int**)0x818AD3B = &fsh[1].zipFilePos;
-	*(int**)0x818BE45 = &fsh[1].zipFilePos;
-
-	*(char**)0x818AAA3 = fsh[1].name;
-	*(char**)0x818BEA7 = fsh[1].name;
-
-	/* Done with fsh patch */
-
-	*(searchpath_t***)0x81280DA = &fs_searchpaths;
-	*(searchpath_t***)0x8128297 = &fs_searchpaths;
-	*(searchpath_t***)0x8128402 = &fs_searchpaths;
-	*(searchpath_t***)0x8128477 = &fs_searchpaths;
-	*(searchpath_t***)0x812857E = &fs_searchpaths;
-	*(searchpath_t***)0x8129018 = &fs_searchpaths;
-	*(searchpath_t***)0x8129657 = &fs_searchpaths;
-	*(searchpath_t***)0x81864E7 = &fs_searchpaths;
-	*(searchpath_t***)0x818656B = &fs_searchpaths;
-	*(searchpath_t***)0x818663E = &fs_searchpaths;
-	*(searchpath_t***)0x818737F = &fs_searchpaths;
-	*(searchpath_t***)0x818738A = &fs_searchpaths;
-	*(searchpath_t***)0x8187ABC = &fs_searchpaths;
-	*(searchpath_t***)0x8187CDE = &fs_searchpaths;
-	*(searchpath_t***)0x8188826 = &fs_searchpaths;
-	*(searchpath_t***)0x8188B18 = &fs_searchpaths;
-	*(searchpath_t***)0x8188B97 = &fs_searchpaths;
-	*(searchpath_t***)0x8188CCA = &fs_searchpaths;
-	*(searchpath_t***)0x8189690 = &fs_searchpaths;
-	*(searchpath_t***)0x818969C = &fs_searchpaths;
-	*(searchpath_t***)0x818998A = &fs_searchpaths;
-	*(searchpath_t***)0x8189B41 = &fs_searchpaths;
-	*(searchpath_t***)0x8189B4D = &fs_searchpaths;
-	*(searchpath_t***)0x8189BCF = &fs_searchpaths;
-	*(searchpath_t***)0x818AE36 = &fs_searchpaths;
-	*(searchpath_t***)0x818B6BF = &fs_searchpaths;
-	*(searchpath_t***)0x818E785 = &fs_searchpaths;
-	*(searchpath_t***)0x818E790 = &fs_searchpaths;
-	*(searchpath_t***)0x818E7A4 = &fs_searchpaths;
-
-	*(char**)0x8186B14 = fs_gamedir;
-	*(char**)0x818790F = fs_gamedir;
-	*(char**)0x818799C = fs_gamedir;
-	*(char**)0x8187A37 = fs_gamedir;
-	*(char**)0x8189BB4 = fs_gamedir;
-	*(char**)0x818A3EC = fs_gamedir;
-	*(char**)0x818A431 = fs_gamedir;
-	*(char**)0x818A50B = fs_gamedir;
-	*(char**)0x818A59E = fs_gamedir;
-	*(char**)0x818A64B = fs_gamedir;
-	*(char**)0x818A86A = fs_gamedir;
-	*(char**)0x818A9CB = fs_gamedir;
-	*(char**)0x818BB2C = fs_gamedir;
-	*(char**)0x819C381 = fs_gamedir;
-	*(char**)0x819C64D = fs_gamedir;
-	*(char**)0x819C679 = fs_gamedir;
-	*(char**)0x819CEFD = fs_gamedir;
-	*(char**)0x819CF27 = fs_gamedir;
-	*(char**)0x819D09A = fs_gamedir;
-
-	*(int**)0x818655E = &fs_loadStack;
-	*(int**)0x81865FD = &fs_loadStack;
-	*(int**)0x8187435 = &fs_loadStack;
-	*(int**)0x818BBCE = &fs_loadStack;
-
-	*(int**)0x818819d = &fs_numServerIwds;
-	*(int**)0x81885fc = &fs_numServerIwds;
-
-	*(int**)0x81881b8 = fs_serverIwds;
-	*(int**)0x81881c7 = fs_serverIwds;
-
+  for ( i = fs_searchpaths; i; i = i->next )
+  {
+    if ( i->pack && !Q_stricmp(i->pack->pakGamename, pszGameFolder) )
+    {
+      return;
+    }
+  }
+  FS_AddIwdFilesForGameDirectory(fs_homepath->string, pszGameFolder);
 }
 
 
@@ -3484,7 +3366,7 @@ void FS_Shutdown( qboolean closemfp ) {
 	searchpath_t    *p, *next;
 	int i;
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 	for ( i = 0; i < MAX_FILE_HANDLES; i++ ) {
 		if ( fsh[i].handleSync ) {
@@ -3514,13 +3396,18 @@ void FS_Shutdown( qboolean closemfp ) {
 	Cmd_RemoveCommand( "which" );
 	Cmd_RemoveCommand( "fdir" );
 
+        if(fs_additionalPureChecksums)
+        {
+            Z_Free(fs_additionalPureChecksums);
+        }
+        fs_additionalPureChecksums = NULL;
 
 #ifdef FS_MISSING
 	if ( closemfp ) {
 		fclose( missingFiles );
 	}
 #endif
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 }
 
 
@@ -3532,7 +3419,7 @@ FS_ClearPakReferences
 void FS_ClearPakReferences( int flags ) {
 	searchpath_t *search;
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 	if ( !flags ) {
 		flags = -1;
@@ -3544,7 +3431,7 @@ void FS_ClearPakReferences( int flags ) {
 		}
 	}
 
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 }
 
 /*
@@ -3571,14 +3458,14 @@ void FS_LoadedPaks( char* outsums, char* outnames, int maxlen ) {
 		}
 
 		if ( *outsums ) {
-			Q_strcat( outsums, maxlen, " " );
+			Q_strncat( outsums, maxlen, " " );
 		}
-		Q_strcat( outsums, maxlen, va( "%i", search->pack->checksum ));
+		Q_strncat( outsums, maxlen, va( "%i", search->pack->checksum ));
 
 		if ( *outnames ) {
-			Q_strcat( outnames, maxlen, " " );
+			Q_strncat( outnames, maxlen, " " );
 		}
-		Q_strcat( outnames, maxlen, search->pack->pakBasename );
+		Q_strncat( outnames, maxlen, search->pack->pakBasename );
 	}
 
 }
@@ -3590,7 +3477,7 @@ FS_Restart
 */
 void FS_Restart( int checksumFeed ) {
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 	// free anything we currently have loaded
 	FS_Shutdown( qfalse );
@@ -3638,7 +3525,7 @@ void FS_Restart( int checksumFeed ) {
 	Q_strncpyz( lastValidBase, fs_basepath->string, sizeof( lastValidBase ) );
 	Q_strncpyz( lastValidGame, fs_gamedirvar->string, sizeof( lastValidGame ) );
 
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 }
 
@@ -3656,7 +3543,7 @@ void FS_CopyFile( char *fromOSPath, char *toOSPath ) {
 	byte    *buf;
 	mvabuf;
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 	if ( fs_debug->integer ) {
 		Sys_Print( va("^4copy %s to %s\n", fromOSPath, toOSPath ) );
@@ -3664,7 +3551,7 @@ void FS_CopyFile( char *fromOSPath, char *toOSPath ) {
 
 	f = fopen( fromOSPath, "rb" );
 	if ( !f ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return;
 	}
 	fseek( f, 0, SEEK_END );
@@ -3680,23 +3567,23 @@ void FS_CopyFile( char *fromOSPath, char *toOSPath ) {
 	fclose( f );
 
 	if ( FS_CreatePath( toOSPath ) ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return;
 	}
 
 	f = fopen( toOSPath, "wb" );
 	if ( !f ) {
 		free( buf );    //DAJ free as well
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return;
 	}
 	if ( fwrite( buf, 1, len, f ) != len ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		Com_Error( ERR_FATAL, "Short write in FS_Copyfiles()\n" );
 	}
 	fclose( f );
 	free( buf );
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 }
 
@@ -3716,11 +3603,11 @@ fileHandle_t FS_FOpenFileWrite( const char *filename ) {
 		Com_Error( ERR_FATAL, "Filesystem call made without initialization\n" );
 	}
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 	f = FS_HandleForFile();
 	if(f == 0){
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return 0;
 	}
 	FS_SetFilenameForHandle(f, filename);
@@ -3733,7 +3620,7 @@ fileHandle_t FS_FOpenFileWrite( const char *filename ) {
 	}
 
 	if ( FS_CreatePath( ospath ) ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return 0;
 	}
 
@@ -3742,7 +3629,7 @@ fileHandle_t FS_FOpenFileWrite( const char *filename ) {
 	//Com_DPrintf( "writing to: %s\n", ospath );
 	fsh[f].handleFiles.file.o = fopen( ospath, "wb" );
 
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 	Q_strncpyz( fsh[f].name, filename, sizeof( fsh[f].name ) );
 
@@ -3767,7 +3654,7 @@ fileHandle_t __cdecl FS_FOpenFileAppend( const char *filename ) {
 	fileHandle_t f;
 	mvabuf;
 
-	Sys_EnterCriticalSection(CRIT_FILESYSTEM);
+	Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
 
 
 	if ( !FS_Initialized() ) {
@@ -3782,7 +3669,7 @@ fileHandle_t __cdecl FS_FOpenFileAppend( const char *filename ) {
 	}
 
 	if(f == 0){
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return 0;
 	}
 	FS_SetFilenameForHandle(f, filename);
@@ -3800,14 +3687,14 @@ fileHandle_t __cdecl FS_FOpenFileAppend( const char *filename ) {
 	}
 
 	if ( FS_CreatePath( ospath ) ) {
-		Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+		Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 		return 0;
 	}
 
 	fsh[f].handleFiles.file.o = fopen( ospath, "ab" );
 	fsh[f].handleSync = qfalse;
 
-	Sys_LeaveCriticalSection(CRIT_FILESYSTEM);
+	Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
 
 
 	if ( !fsh[f].handleFiles.file.o ) {
@@ -3838,9 +3725,13 @@ __regparm3 void DB_BuildOSPath(const char *filename, int ffdir, int len, char *b
             {
                 languagestr = "english";
             }
-
-            Com_sprintf(ospath, sizeof(ospath), "zone/%s/%s.ff", languagestr, filename);
-            FS_SV_GetFilepath( ospath, buff, len );
+            //Shitty workaround due to updatesystem
+            Com_sprintf(ospath, sizeof(ospath), "zone/%s.ff", filename);
+            if(FS_SV_GetFilepath( ospath, buff, len ) == NULL)
+            {
+                Com_sprintf(ospath, sizeof(ospath), "zone/%s/%s.ff", languagestr, filename);
+                FS_SV_GetFilepath( ospath, buff, len );
+            }
             return;
 
         case 1:
@@ -3869,6 +3760,8 @@ void DB_BuildQPath(const char *filename, int ffdir, int len, char *buff)
     const char *languagestr;
     char *mapstrend;
     char mapname[MAX_QPATH];
+    char tmppath[MAX_OSPATH];
+    char tmppath2[MAX_OSPATH];
 
     switch(ffdir)
     {
@@ -3879,7 +3772,13 @@ void DB_BuildQPath(const char *filename, int ffdir, int len, char *buff)
                 languagestr = "english";
             }
 
-            Com_sprintf(buff, len, "zone/%s/%s.ff", languagestr, filename);
+            Com_sprintf(tmppath, sizeof(tmppath), "zone/%s.ff", filename);
+            if(FS_SV_GetFilepath( tmppath, tmppath2, sizeof(tmppath) ) == NULL)
+            {
+                Com_sprintf(buff, len, "zone/%s/%s.ff", languagestr, filename);
+            }else{
+                Com_sprintf(buff, len, "zone/%s.ff", filename);
+            }
             return;
 
         case 1:
@@ -4077,14 +3976,14 @@ void FS_ReferencedPaks(char *outChkSums, char *outPathNames, int maxlen)
   for ( puresum = fs_iwdPureChecks; puresum; puresum = puresum->next )
   {
 	Com_sprintf(chksum, sizeof(chksum), "%i ", puresum->checksum);
-	Q_strcat(chkSumString, sizeof(chkSumString), chksum);
+	Q_strncat(chkSumString, sizeof(chkSumString), chksum);
 	if ( pathString[0] )
 	{
-		Q_strcat(pathString, sizeof(pathString), " ");
+		Q_strncat(pathString, sizeof(pathString), " ");
 	}
-	Q_strcat(pathString, sizeof(pathString), puresum->gameName);
-    Q_strcat(pathString, sizeof(pathString), "/");
-    Q_strcat(pathString, sizeof(pathString), puresum->baseName);
+	Q_strncat(pathString, sizeof(pathString), puresum->gameName);
+    Q_strncat(pathString, sizeof(pathString), "/");
+    Q_strncat(pathString, sizeof(pathString), puresum->baseName);
   }
 
   if ( fs_gameDirVar->string[0] )
@@ -4098,14 +3997,14 @@ void FS_ReferencedPaks(char *outChkSums, char *outPathNames, int maxlen)
 			)
 			{
 			Com_sprintf(chksum, sizeof(chksum), "%i ", search->pack->checksum);
-			Q_strcat(chkSumString, sizeof(chkSumString), chksum);
+			Q_strncat(chkSumString, sizeof(chkSumString), chksum);
 			if ( pathString[0] )
 			{
-				Q_strcat(pathString, sizeof(pathString), " ");
+				Q_strncat(pathString, sizeof(pathString), " ");
 			}
-			Q_strcat(pathString, sizeof(pathString), search->pack->pakGamename);
-			Q_strcat(pathString, sizeof(pathString), "/");
-			Q_strcat(pathString, sizeof(pathString), search->pack->pakBasename);
+			Q_strncat(pathString, sizeof(pathString), search->pack->pakGamename);
+			Q_strncat(pathString, sizeof(pathString), "/");
+			Q_strncat(pathString, sizeof(pathString), search->pack->pakBasename);
 			}
 			}
 	  }
@@ -4134,8 +4033,18 @@ void FS_ShutdownServerIwdNames()
     FS_ShutdownReferencedFiles(&fs_numServerIwds, fs_serverIwdNames);
 }
 
+int fs_numServerReferencedFFs, fs_numServerReferencedIwds;
+char* fs_serverReferencedFFNames, *fs_serverReferencedIwdNames;
 
+void __cdecl FS_ShutdownServerReferencedIwds()
+{
+  FS_ShutdownReferencedFiles(&fs_numServerReferencedIwds, &fs_serverReferencedIwdNames);
+}
 
+void __cdecl FS_ShutdownServerReferencedFFs()
+{
+  FS_ShutdownReferencedFiles(&fs_numServerReferencedFFs, &fs_serverReferencedFFNames);
+}
 
 
 /*
@@ -4249,7 +4158,7 @@ int FS_PureServerSetLoadedIwds(const char *paksums, const char *paknames)
     fs_numServerIwds = numPakSums;
     if ( numPakSums )
     {
-      Com_DPrintf("Connected to a pure server.\n");
+      Com_DPrintf(CON_CHANNEL_FILES,"Connected to a pure server.\n");
       Com_Memcpy(fs_serverIwds, lpakSums, sizeof(int) * fs_numServerIwds);
       Com_Memcpy(fs_serverIwdNames, lpakNames, sizeof(char*) * fs_numServerIwds);
       //fs_fakeChkSum = 0;
@@ -4304,7 +4213,7 @@ fs_crcsum_t* FS_FindChecksumForFile(const char* filename, int len)
         }
 
     }
-    Com_PrintError("Exceeded number of maximum files for checksumming\n");
+    Com_PrintError(CON_CHANNEL_FILES,"Exceeded number of maximum files for checksumming\n");
     Com_Memset(&fscrcsums.sums[SERVERFILEMAXCHKSUM / 2 -1], 0, sizeof(fscrcsums.sums) / 2);
 
     return &fscrcsums.sums[SERVERFILEMAXCHKSUM / 2 -1];
@@ -4363,12 +4272,12 @@ int FS_WriteChecksumInfo(const char* filename, byte* data, int maxsize)
     }
     if(maxsize < sizeof(fs_crcsum_t))
     {
-        Com_PrintError("FS_WriteChecksumInfo(): Insufficient buffer size. Expected %d but got %d\n", sizeof(fs_crcsum_t), maxsize);
+        Com_PrintError(CON_CHANNEL_FILES,"FS_WriteChecksumInfo(): Insufficient buffer size. Expected %d but got %d\n", sizeof(fs_crcsum_t), maxsize);
         return 0;
     }
     if(strcmp(chksums->qpath, filename) == 0)
     {
-        Com_Printf("Writing %s len %d\n", chksums->qpath, chksums->length);
+        Com_Printf(CON_CHANNEL_FILES,"Writing %s len %d\n", chksums->qpath, chksums->length);
         Com_Memcpy(data, chksums, sizeof(fs_crcsum_t));
         return sizeof(fs_crcsum_t);
     }
@@ -4386,4 +4295,901 @@ int FS_WriteChecksumInfo(const char* filename, byte* data, int maxsize)
     //Slow search did not generate results :/
     return 0;
 
+}
+
+
+/*
+=================
+FS_ReadOSPath
+
+Properly handles partial reads
+=================
+*/
+int FS_ReadOSPath( void *buffer, int len, FILE* f ) {
+	int		block, remaining;
+	int		read;
+	byte	*buf;
+
+	if ( !f ) {
+		return 0;
+	}
+
+	buf = (byte *)buffer;
+
+	remaining = len;
+	while (remaining) {
+		block = remaining;
+		read = fread (buf, 1, block, f);
+		if (read == 0)
+		{
+			return len-remaining;	//Com_Error (ERR_FATAL, "FS_Read: 0 bytes read");
+		}
+
+		if (read == -1) {
+			Com_Error(ERR_FATAL, "FS_ReadOSPath: -1 bytes read");
+		}
+
+		remaining -= read;
+		buf += read;
+	}
+	return len;
+
+}
+
+
+/*
+================
+FS_filelengthOSPath
+
+If this is called on a non-unique FILE (from a pak file),
+it will return the size of the pak file, not the expected
+size of the file.
+================
+*/
+int FS_filelengthOSPath( FILE* h ) {
+	int		pos;
+	int		end;
+
+	pos = ftell (h);
+	fseek (h, 0, SEEK_END);
+	end = ftell (h);
+	fseek (h, pos, SEEK_SET);
+
+	return end;
+}
+
+/*
+===========
+FS_FOpenFileReadOSPathUni
+search for a file somewhere below the home path, base path or cd path
+we search in that order, matching FS_SV_FOpenFileRead order
+===========
+*/
+int FS_FOpenFileReadOSPath( const char *filename, FILE **fp ) {
+	char ospath[MAX_OSPATH];
+	FILE* fh;
+
+	Q_strncpyz( ospath, filename, sizeof( ospath ) );
+
+	fh = fopen( ospath, "rb" );
+
+	if ( !fh ){
+		*fp = NULL;
+		return -1;
+	}
+
+	*fp = fh;
+
+	return FS_filelengthOSPath(fh);
+}
+
+/*
+==============
+FS_FCloseFileOSPath
+
+==============
+*/
+qboolean FS_FCloseFileOSPath( FILE* f ) {
+
+	if (f) {
+	    fclose (f);
+	    return qtrue;
+	}
+	return qfalse;
+}
+
+
+/*
+============
+FS_ReadFileOSPath
+
+Filename are os paths a null buffer will just return the file length without loading
+============
+*/
+int FS_ReadFileOSPath( const char *ospath, void **buffer ) {
+	byte*	buf;
+	int		len;
+	FILE*   h;
+
+
+	if ( !ospath || !ospath[0] ) {
+		Com_Error(ERR_FATAL, "FS_ReadFileOSPath with empty name\n" );
+	}
+
+	buf = NULL;	// quiet compiler warning
+
+	// look for it in the filesystem or pack files
+	len = FS_FOpenFileReadOSPath( ospath, &h );
+	if ( len == -1 ) {
+		if ( buffer ) {
+			*buffer = NULL;
+		}
+		return -1;
+	}
+
+	if ( !buffer ) {
+		FS_FCloseFileOSPath( h );
+		return len;
+	}
+
+	buf = malloc(len+1);
+	if(buf == NULL)
+	{
+		Com_Error(ERR_FATAL, "FS_ReadFileOSPathUni got no memory\n" );
+	}
+	*buffer = buf;
+
+	FS_ReadOSPath (buf, len, h);
+
+	// guarantee that it will have a trailing 0 for string operations
+	buf[len] = 0;
+	FS_FCloseFileOSPath( h );
+	return len;
+}
+
+
+/*
+=============
+FS_FreeFile
+=============
+*/
+void FS_FreeFileOSPath( void *buffer ) {
+
+	if ( !buffer ) {
+		Com_Error( ERR_FATAL, "FS_FreeFile( NULL )" );
+	}
+	//Like regular FS_FreeFile but ignoring FS_LoadStack
+	free( buffer );
+}
+
+
+
+bool __cdecl FS_IsBackupSubStr(const char *filenameSubStr)
+{
+  bool result;
+
+  if ( filenameSubStr[0] != '.' || filenameSubStr[1] != '.' )
+  {
+    if(filenameSubStr[0] == ':' && filenameSubStr[1] == ':')
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+  }
+  else
+  {
+    result = 1;
+  }
+  return result;
+}
+
+
+char __cdecl FS_SanitizeFilename(const char *filename, char *sanitizedName, int sanitizedNameSize)
+{
+  int srcIndex;
+  int dstIndex;
+
+  assert(filename);
+  assert(sanitizedName);
+  assert(sanitizedNameSize > 0);
+
+  for ( srcIndex = 0; ; ++srcIndex )
+  {
+    if ( !(filename[srcIndex] == '/' || filename[srcIndex] == '\\') )
+    {
+      break;
+    }
+  }
+
+  dstIndex = 0;
+  while ( filename[srcIndex] )
+  {
+    if ( FS_IsBackupSubStr(&filename[srcIndex]) )
+    {
+      return 0;
+    }
+    if ( filename[srcIndex] != '.' || (filename[srcIndex + 1] != 0 && 
+	filename[srcIndex + 1] != '/' && filename[srcIndex + 1] != '\\' ))
+    {
+      if ( dstIndex + 1 >= sanitizedNameSize )
+      {
+        assert(dstIndex + 1 < sanitizedNameSize);
+        return 0;
+      }
+      if ( filename[srcIndex] == '/' || filename[srcIndex] == '\\' )
+      {
+        sanitizedName[dstIndex] = '/';
+        while ( 1 )
+        {
+          if ( !(filename[srcIndex +1] == '/' || filename[srcIndex +1] == '\\') )
+          {
+            break;
+          }
+          ++srcIndex;
+        }
+      }
+      else
+      {
+        sanitizedName[dstIndex] = filename[srcIndex];
+      }
+      ++dstIndex;
+    }
+    ++srcIndex;
+  }
+  assert ( dstIndex <= srcIndex);
+  sanitizedName[dstIndex] = 0;
+  return 1;
+}
+
+qboolean __cdecl FS_UseSearchPath(searchpath_t *pSearch)
+{
+
+  if ( pSearch->localized && fs_ignoreLocalized->boolean )
+  {
+    return 0;
+  }
+  return !pSearch->localized || pSearch->langIndex == SEH_GetCurrentLanguage();
+}
+
+FILE *__cdecl FileWrapper_Open(const char *ospath, const char *mode)
+{
+  FILE *file;
+
+  file = fopen(ospath, mode);
+
+  return file;
+}
+
+FILE *__cdecl FS_FileOpenWriteBinary(const char *filename)
+{
+  FILE *file;
+
+//  ProfLoad_BeginTrackedValue(0);
+  file = FileWrapper_Open(filename, "wb");
+//  ProfLoad_EndTrackedValue(0);
+  return file;
+}
+
+
+FILE* __cdecl FS_FileOpenReadBinary(const char *filename)
+{
+  FILE *file;
+
+//  ProfLoad_BeginTrackedValue(0);
+  file = FileWrapper_Open(filename, "rb");
+//  ProfLoad_EndTrackedValue(0);
+  return file;
+}
+
+FILE* __cdecl FS_FileOpenWriteText(const char *filename)
+{
+  FILE *file;
+
+//  ProfLoad_BeginTrackedValue(0);
+  file = FileWrapper_Open(filename, "wt");
+//  ProfLoad_EndTrackedValue(0);
+  return file;
+}
+
+
+void __cdecl FS_FileClose(FILE *stream)
+{
+  fclose(stream);
+}
+
+
+fileHandle_t __cdecl FS_GetHandleAndOpenFile(const char *filename, const char *ospath, int thread)
+{
+  fileHandle_t f;
+  FILE *fp;
+
+  fp = FS_FileOpenWriteBinary(ospath);
+  if ( fp )
+  {
+    f = FS_HandleForFileForThread(thread);
+
+    fsh[f].zipFile = 0;
+    fsh[f].handleFiles.file.o = fp;
+    Q_strncpyz(fsh[f].name, filename, sizeof(fsh[0].name));
+    fsh[f].handleSync = 0;
+
+    return f;
+  }
+  return 0;
+}
+
+
+int __cdecl FS_GetFileOsPath(const char *filename, char *ospath)
+{
+  char sanitizedName[256];
+  directory_t *dir;
+  struct searchpath_s *search;
+  FILE *fp;
+
+
+  assert(filename);
+  assert(ospath);
+
+  if ( FS_SanitizeFilename(filename, sanitizedName, 256) )
+  {
+    for ( search = fs_searchpaths; search; search = search->next )
+    {
+      if ( FS_UseSearchPath(search) )
+      {
+        if ( !search->pack )
+        {
+          dir = search->dir;
+          FS_BuildOSPathForThread(dir->path, dir->gamedir, sanitizedName, ospath, 0);
+          fp = FS_FileOpenReadBinary(ospath);
+          if ( fp )
+          {
+            FS_FileClose(fp);
+            return 0;
+          }
+        }
+      }
+    }
+  }
+  return -1;
+}
+
+
+
+int __cdecl FS_OpenFileOverwrite(const char *qpath)
+{
+  DWORD v1;
+  char ospath[256];
+  unsigned int attributes;
+
+  if(!FS_Initialized())
+    Com_Error(ERR_FATAL, "Filesystem call made without initialization");
+
+  assert(qpath);
+
+  if ( FS_GetFileOsPath(qpath, ospath) < 0 )
+  {
+    Com_Error(ERR_DROP, "FS_FOpenFileOverWrite: Failed to open %s for writing.  It either does not exist or is in a iwd file.", qpath);
+  }
+  if ( fs_debug->integer )
+  {
+    Com_Printf(CON_CHANNEL_FILES, "FS_FOpenFileOverWrite: %s\n", ospath);
+  }
+  v1 = _GetFileAttributesA(ospath);
+  attributes = v1 & 0xFFFFFFFE;
+  if (attributes != v1 )
+  {
+    _SetFileAttributesA(ospath, attributes);
+  }
+  return FS_GetHandleAndOpenFile(qpath, ospath, 0);
+}
+
+int __cdecl FS_FOpenTextFileWrite(const char *filename)
+{
+  char ospath[MAX_OSPATH];
+  const char *basepath;
+  FILE *f;
+  fileHandle_t h;
+
+  h = 0;
+
+  if(!FS_Initialized())
+    Com_Error(ERR_FATAL, "Filesystem call made without initialization");
+
+  basepath = fs_homepath->string;
+  FS_BuildOSPathForThread(basepath, fs_gamedir, filename, ospath, 0);
+  if ( fs_debug->integer )
+  {
+    Com_Printf(CON_CHANNEL_FILES, "FS_FOpenTextFileWrite: %s\n", ospath);
+  }
+  if ( FS_CreatePath(ospath) )
+  {
+    return 0;
+  }
+
+    f = FS_FileOpenWriteText(ospath);
+    if ( f )
+    {
+    //h = FS_HandleForFileForCurrentThread();
+      h = FS_HandleForFile();
+      fsh[h].zipFile = 0;
+      fsh[h].handleFiles.file.o = f;
+      Q_strncpyz(fsh[h].name, filename, sizeof(fsh[0].name));
+      fsh[h].handleSync = 0;
+      if ( !fsh[h].handleFiles.file.o )
+      {
+        FS_FCloseFile(h);
+        h = 0;
+      }
+      return h;
+    }
+    return 0;
+}
+
+FILE *__cdecl FS_FileOpenReadText(const char *filename)
+{
+  FILE *file; // ST0C_4@1
+
+//  ProfLoad_BeginTrackedValue(0);
+  file = FileWrapper_Open(filename, "rt");
+//  ProfLoad_EndTrackedValue(0);
+  return file;
+}
+
+int __cdecl FS_FileGetFileSize(FILE *file)
+{
+  return FileWrapper_GetFileSize(file);
+}
+
+unsigned int __cdecl FS_FileRead(void *ptr, unsigned int len, FILE *stream)
+{
+  unsigned int read_size;
+
+//  ProfLoad_BeginTrackedValue(MAP_PROFILE_FILE_READ);
+  read_size = fread(ptr, 1u, len, stream);
+//  ProfLoad_EndTrackedValue(MAP_PROFILE_FILE_READ);
+  return read_size;
+}
+
+
+const char **__cdecl FS_ListFiles(const char *path, const char *extension, int behavior, int *numfiles)
+{
+    return (const char**)Sys_ListFiles(path, extension, 0, numfiles, qfalse);
+}
+
+void FS_FreeFileList(const char** list)
+{
+    Sys_FreeFileList((char**)list);
+}
+
+/*
+int __cdecl FS_GetModList(char *listbuf, int bufsize)
+{
+  char v2; // ST47_1@4
+  _iobuf *file; // ST64_4@7
+  char v4; // ST27_1@13
+  char v5; // ST17_1@15
+  char *v7; // [sp+8h] [bp-17Ch]@14
+  char *v8; // [sp+Ch] [bp-178h]@14
+  char *v9; // [sp+18h] [bp-16Ch]@12
+  char *v10; // [sp+1Ch] [bp-168h]@12
+  char *v11; // [sp+38h] [bp-14Ch]@3
+  char *v12; // [sp+3Ch] [bp-148h]@3
+  int nMods; // [sp+54h] [bp-130h]@1
+  int nDescLen; // [sp+58h] [bp-12Ch]@7 MAPDST
+  int descHandle; // [sp+5Ch] [bp-128h]@5
+  const char *basepath; // [sp+60h] [bp-124h]@1
+  int dummy; // [sp+64h] [bp-120h]@1
+  char *name; // [sp+68h] [bp-11Ch]@3
+  char descPath[256]; // [sp+6Ch] [bp-118h]@1
+  int nPotential; // [sp+170h] [bp-14h]@1
+  int nLen; // [sp+174h] [bp-10h]@3
+  int nTotal; // [sp+178h] [bp-Ch]@1
+  int i; // [sp+17Ch] [bp-8h]@1
+  char **pFiles; // [sp+180h] [bp-4h]@1
+  char *listbufa; // [sp+18Ch] [bp+8h]@14
+
+  pFiles = 0;
+  *listbuf = 0;
+  nTotal = 0;
+  nPotential = 0;
+  nMods = 0;
+  basepath = fs_homepath->current.string;
+  Com_sprintf(descPath, 256, "%s/%s", basepath, "mods");
+  pFiles = Sys_ListFiles(descPath, 0, 0, &dummy, 1);
+  nPotential = Sys_CountFileList(pFiles);
+  for ( i = 0; i < nPotential; ++i )
+  {
+    name = pFiles[i];
+    nLen = strlen(name) + 1;
+    v12 = name;
+    v11 = descPath;
+    do
+    {
+      v2 = *v12;
+      *v11++ = *v12++;
+    }
+    while ( v2 );
+    I_strncat(descPath, 256, "/description.txt");
+    if ( FS_SV_FOpenFileRead(descPath, "mods", &descHandle) > 0 && descHandle )
+    {
+      file = FS_FileForHandle(descHandle);
+      Com_Memset(descPath, 0, 256);
+      nDescLen = FS_FileRead(descPath, 0x30u, file);
+      if ( nDescLen >= 0 )
+      {
+        descPath[nDescLen] = 0;
+      }
+      FS_FCloseFile(descHandle);
+    }
+    else
+    {
+      Com_Printf(CON_CHANNEL_FILES, "FS_GetModList: failed to open %s\n", descPath);
+      descPath[0] = 0;
+    }
+    nDescLen = strlen(descPath) + 1;
+    if ( nLen + nTotal + nDescLen + 2 >= bufsize )
+    {
+      break;
+    }
+    v10 = name;
+    v9 = listbuf;
+    do
+    {
+      v4 = *v10;
+      *v9++ = *v10++;
+    }
+    while ( v4 );
+    listbufa = &listbuf[nLen];
+    v8 = descPath;
+    v7 = listbufa;
+    do
+    {
+      v5 = *v8;
+      *v7++ = *v8++;
+    }
+    while ( v5 );
+    listbuf = &listbufa[nDescLen];
+    nTotal += nDescLen + nLen;
+    ++nMods;
+  }
+  FS_FreeFileList((const char **)pFiles);
+  return nMods;
+}
+*/
+
+int __cdecl FS_GetFileList(const char *path, const char *extension, int behavior, char *listbuf, int bufsize)
+{
+  int result;
+  const char **fileNames;
+  int nLen;
+  int nTotal;
+  int i;
+  int fileCount;
+
+  *listbuf = 0;
+  fileCount = 0;
+  nTotal = 0;
+  if ( Q_stricmp(path, "$modlist") )
+  {
+    fileNames = FS_ListFiles(path, extension, behavior, &fileCount);
+    for ( i = 0; i < fileCount; ++i )
+    {
+      nLen = strlen(fileNames[i]) + 1;
+      if ( nTotal + nLen + 1 >= bufsize )
+      {
+        fileCount = i;
+        break;
+      }
+      strcpy(listbuf, fileNames[i]);
+      listbuf += nLen;
+      nTotal += nLen;
+    }
+    FS_FreeFileList(fileNames);
+    result = fileCount;
+  }
+  else
+  {
+    result = FS_GetModList(listbuf, bufsize);
+  }
+  return result;
+}
+
+qboolean __cdecl FS_LanguageHasAssets(int iLanguage)
+{
+  searchpath_t *pSearch;
+
+  for ( pSearch = fs_searchpaths; pSearch; pSearch = pSearch->next )
+  {
+    if ( pSearch->localized && pSearch->langIndex == iLanguage )
+    {
+      return qtrue;
+    }
+  }
+  return qfalse;
+}
+
+
+char *__cdecl FS_GetMapBaseName(const char *mapname)
+{
+  int c;
+  int len;
+  static char basename[MAX_QPATH];
+
+  assert(mapname != NULL);
+
+  if ( !Q_stricmpn(mapname, "maps/mp/", 8) )
+  {
+    mapname += 8;
+  }
+  len = strlen(mapname);
+  if(len >= sizeof(basename))
+  if ( !Q_stricmp(&mapname[len - 3], "bsp") )
+  {
+    len = len - 7;
+  }
+  memcpy(basename, (char *)mapname, len);
+  basename[len] = 0;
+  for ( c = 0; c < len; ++c )
+  {
+    if ( basename[c] == '%' )
+    {
+      basename[c] = '_';
+    }
+  }
+  return basename;
+}
+
+//8kbyte buffer
+#define DEFAULT_LOGFILEBUFFER (1024*8)
+
+void FS_CloseLogFile(fileHandle_t f)
+{
+    fileHandleData_t *fhd;
+
+    if(f < 1)
+    {
+        return;
+    }
+
+    fhd = &fsh[f];
+
+    FS_WriteLogFlush( f );
+
+    Z_Free(fhd->writebuffer);
+    FS_FCloseFile( f );
+}
+
+
+fileHandle_t FS_OpenLogfile(const char* name, char mode)
+{
+	fileHandle_t logfile;
+	fileHandleData_t *fhd;
+
+	switch( mode)
+	{
+		case 'w':
+			logfile = FS_FOpenFileWrite( name );
+			break;
+		case 'a':
+			logfile = FS_FOpenFileAppend( name );
+			break;
+		default:
+			logfile = 0;
+	}
+	if(!logfile)
+	{
+		return 0;
+	}
+	fhd = &fsh[logfile];
+
+	fhd->writebuffer = Z_Malloc(DEFAULT_LOGFILEBUFFER);
+	if(fhd->writebuffer == NULL)
+	{
+		FS_FCloseFile( logfile );
+		return 0;
+	}
+	fhd->bufferSize = DEFAULT_LOGFILEBUFFER;
+	fhd->bufferPos = 0;
+	fhd->rbufferPos = 0;
+	return logfile;
+}
+
+int FS_WriteLog( const void *buffer, int ilen, fileHandle_t h )
+{
+	fileHandleData_t *fhd;
+	int remaining;
+	int writelen;
+	int i, len;
+	len = ilen;
+
+	fhd = &fsh[h];
+	if(fhd->writebuffer == NULL)
+	{
+		Com_Error(ERR_FATAL, "attempted to use FS_WriteLog on a non logfile handle");
+	}
+
+	Sys_EnterCriticalSection(CRITSECT_LOGFILETHREAD);
+
+	if(fhd->bufferPos >= fhd->rbufferPos)
+	{
+	    remaining = DEFAULT_LOGFILEBUFFER - (fhd->bufferPos - fhd->rbufferPos) -1;
+	}else{
+	    remaining = (fhd->rbufferPos - fhd->bufferPos) -1;
+	}
+
+	writelen = len;
+	if(remaining < writelen)
+	{
+		writelen = remaining;
+	}
+	int index;
+	for(i = 0; i < writelen; ++i)
+	{
+		index = (fhd->bufferPos + i) % DEFAULT_LOGFILEBUFFER;
+		((char*)fhd->writebuffer)[index] = ((char*)buffer)[i];
+	}
+	fhd->bufferPos = (fhd->bufferPos + i) % DEFAULT_LOGFILEBUFFER;
+
+	Sys_LeaveCriticalSection(CRITSECT_LOGFILETHREAD);
+
+	return writelen;
+}
+
+
+void FS_WriteLogFlush( fileHandle_t h ) //This function gets called from the logwrite thread and fileclose function
+{
+	fileHandleData_t *fhd;
+	int remaining;
+	int i;
+	char cpybuffer[DEFAULT_LOGFILEBUFFER];
+
+	if(h < 1)
+	{
+		return;
+	}
+
+	fhd = &fsh[h];
+	if(fhd->writebuffer == NULL)
+	{
+		Com_Error(ERR_FATAL, "attempted to use FS_WriteLogFlush on a non logfile handle");
+	}
+
+	Sys_EnterCriticalSection(CRITSECT_LOGFILETHREAD);
+
+	if(fhd->bufferPos == fhd->rbufferPos)
+	{
+		Sys_LeaveCriticalSection(CRITSECT_LOGFILETHREAD);
+		return;
+	}
+
+	if(fhd->bufferPos >= fhd->rbufferPos)
+	{
+	    remaining = (fhd->bufferPos - fhd->rbufferPos);
+	}else{
+	    remaining = DEFAULT_LOGFILEBUFFER - (fhd->rbufferPos - fhd->bufferPos);
+	}
+
+	assert(remaining <= DEFAULT_LOGFILEBUFFER);
+
+	for(i = 0; i < remaining; ++i)
+	{
+	    ((char*)cpybuffer)[i] = ((char*)fhd->writebuffer)[(fhd->rbufferPos + i) % DEFAULT_LOGFILEBUFFER];
+	}
+	fhd->rbufferPos = fhd->bufferPos;
+
+	Sys_LeaveCriticalSection(CRITSECT_LOGFILETHREAD);
+
+	int written = fwrite (cpybuffer, 1, remaining, fhd->handleFiles.file.o);
+	if (written == 0) {
+		Sys_Print("FS_WriteLogFlush: 0 bytes written\n" );
+		return;
+	}
+
+	if (written == -1) {
+		Sys_Print("FS_WriteLogFlush: -1 bytes written\n" );
+		return;
+	}
+	if ( fhd->handleSync ) {
+		fflush( fhd->handleFiles.file.o );
+	}
+
+}
+
+//Parse all zip files for files inside a directory, path must be with forward slash only
+//must Z_Free return value, result will go invalid on FS_Restart
+//On fail return value is NULL
+const char** FS_ListFilesInPackDirectory(const char* directory)
+{
+    int i, h, y;
+    pack_t		*pak;
+    fileInPack_t	*pakFile;
+    int hashtablesize = 2*fs_packFiles;
+    struct searchpath_s* search;
+    unsigned int directorylen = 0;
+
+    if(directory != NULL)
+    {
+        directorylen = strlen(directory);
+    }
+    const char** hashtable = Z_Malloc(hashtablesize * sizeof(const char*));
+    if(hashtable == NULL)
+    {
+        return NULL;
+    }
+
+    if(!FS_Initialized())
+    {
+        Com_Error(ERR_FATAL, "Filesystem call made without initialization");
+    }
+    Sys_EnterCriticalSection(CRITSECT_FILESYSTEM);
+    for(search = fs_searchpaths; search; search = search->next)
+    {
+	if(!search->pack)
+	{
+	    continue;
+	}
+        pak = search->pack;
+        for(i = 0; i < pak->numfiles; ++i)
+        {
+            pakFile = &pak->buildBuffer[i];
+
+            if(directorylen == 0 || !Q_stricmpn(pakFile->name, directory, directorylen))
+            {
+                unsigned int paknamelen = strlen(pakFile->name);
+                if(paknamelen > 0 && pakFile->name[paknamelen -1] != '/') //is directory, not file
+                {
+                    //Add file to hashtable
+                    long hash = FS_HashFileName( pakFile->name, 0x80000000);
+                    for(h = 0; h < 2*fs_packFiles; ++h)
+                    {
+                        const char** entry = &hashtable[(hash +h) % hashtablesize];
+
+                        if(*entry == NULL)
+                        {
+                            *entry = pakFile->name;
+                        }
+
+                        if(strcmp(*entry, pakFile->name) == 0)
+                        {
+                            break; //already in there
+                        }
+
+                    }
+                }
+            }
+        }
+    }
+    Sys_LeaveCriticalSection(CRITSECT_FILESYSTEM);
+
+    unsigned int numentries;
+
+    for(i = 0, numentries = 0; i < hashtablesize; ++i)
+    {
+        if(hashtable[i])
+        {
+            numentries++;
+        }
+    }
+
+    const char** buf = Z_Malloc((numentries +1)* sizeof(const char*));
+    if(!buf)
+    {
+        Z_Free(hashtable);
+        return NULL;
+    }
+
+    for(i = 0, y = 0; i < hashtablesize; ++i)
+    {
+        if(hashtable[i])
+        {
+            buf[y] = hashtable[i];
+            ++y;
+        }
+    }
+    buf[y] = NULL;
+    Z_Free(hashtable);
+    return buf;
 }

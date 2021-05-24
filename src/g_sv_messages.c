@@ -19,7 +19,7 @@
 ===========================================================================
 */
 
-
+#if 0
 
 #include "q_shared.h"
 #include "qcommon.h"
@@ -47,7 +47,7 @@ static char motdBuff[200];
 
 void G_DestroyMessage(game_hudelem_t* hudelem){
 
-    if(!hudelem || !hudelem->type)
+    if(!hudelem || !hudelem->elem.type)
         return;
 
     ucolor_t color;
@@ -59,7 +59,7 @@ void G_DestroyMessage(game_hudelem_t* hudelem){
 
 void G_ShowMessage(game_hudelem_t* hudelem, const char* rule, int time)
 {
-    if(!hudelem || !hudelem->type)
+    if(!hudelem || !hudelem->elem.type)
         return;
 
     ucolor_t color;
@@ -153,8 +153,8 @@ void G_SetupHudMessagesForPlayer(client_t* cl){
     G_HudSetColor(cl->hudMsg, color, glowcolor);
 
 
-    cl->hudMsg->displayOption = HUDDISPLAY_HIDEINMENU | HUDDISPLAY_FOREGROUND;
-    cl->hudMsg->sort = 100;
+    cl->hudMsg->elem.flags = HUDDISPLAY_HIDEINMENU | HUDDISPLAY_FOREGROUND;
+    cl->hudMsg->elem.sort = 100;
 }
 
 
@@ -190,7 +190,7 @@ void G_AddRule(const char* newtext){
             break;
     }
     if(i == MAX_MESSAGES){
-        Com_PrintWarning("Exceeded the limit of %i rules\n", MAX_MESSAGES);
+        Com_PrintWarning(CON_CHANNEL_SERVER,"Exceeded the limit of %i rules\n", MAX_MESSAGES);
         return;
     }
 
@@ -215,7 +215,7 @@ void G_AddRule(const char* newtext){
     }
 
     if(newstrlen >= MAX_MSGBUFF - j){
-        Com_PrintWarning("Exceeded the maximum combined length of all advert and rules\n");
+        Com_PrintWarning(CON_CHANNEL_SERVER,"Exceeded the maximum combined length of all advert and rules\n");
         return;
     }
     //append the new text string to our buffer
@@ -246,7 +246,7 @@ void G_AddAdvert(const char* newtext){
             break;
     }
     if(i == MAX_MESSAGES){
-        Com_PrintWarning("Exceeded the limit of %i adverts\n", MAX_MESSAGES);
+        Com_PrintWarning(CON_CHANNEL_SERVER,"Exceeded the limit of %i adverts\n", MAX_MESSAGES);
         return;
     }
 
@@ -271,7 +271,7 @@ void G_AddAdvert(const char* newtext){
     }
 
     if(newstrlen >= MAX_MSGBUFF - j){
-        Com_PrintWarning("Exceeded the maximum combined length of all advert and rules\n");
+        Com_PrintWarning(CON_CHANNEL_SERVER,"Exceeded the maximum combined length of all advert and rules\n");
         return;
     }
     //append the new text string to our buffer
@@ -391,7 +391,6 @@ void G_ShowMotd(unsigned int clnum)
     color.i = 0xFFCCFFCC;
     glowcolor.i = 0x0A4C994C;
 
-    Com_DPrintf("Draw Message of the Day of client num: %i\n", clnum);
 
     hudelem1 = G_GetNewHudElem(clnum);
 
@@ -415,10 +414,10 @@ void G_ShowMotd(unsigned int clnum)
     G_HudSetFont(hudelem1, fontscale, HUDFONT_OBJECTIVE);
     G_HudSetFont(hudelem2, fontscale, HUDFONT_OBJECTIVE);
 
-    hudelem1->displayOption = HUDDISPLAY_HIDEINMENU | HUDDISPLAY_FOREGROUND;
-    hudelem2->displayOption = HUDDISPLAY_HIDEINMENU | HUDDISPLAY_FOREGROUND;
-    hudelem1->sort = 100;
-    hudelem2->sort = 99;
+    hudelem1->elem.flags = HUDDISPLAY_HIDEINMENU | HUDDISPLAY_FOREGROUND;
+    hudelem2->elem.flags = HUDDISPLAY_HIDEINMENU | HUDDISPLAY_FOREGROUND;
+    hudelem1->elem.sort = 100;
+    hudelem2->elem.sort = 99;
 
     G_HudSetText(hudelem1, motdBuff);
     G_HudSetText(hudelem2, motdBuff);
@@ -436,3 +435,5 @@ void G_ClearAllMessages()
 {
     Com_Memset(&messages, 0, sizeof(msgDisplay_t));
 }
+
+#endif

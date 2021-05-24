@@ -31,6 +31,9 @@
 #include "qcommon_io.h"
 #include "server.h"
 #include "scr_vm.h"
+#include "misc.h"
+#include "cscr_stringlist.h"
+
 
 #include <string.h>
 
@@ -361,18 +364,15 @@ qboolean ClientCanSpectateTeam(gclient_t *ent, team_t team)
 
 qboolean Cmd_FollowClient_f(gentity_t *ent, int clientnum)
 {
-
-    svs.clients[ent->s.number].lastFollowedClient = -1; //Reset this to prevent strange things from happening
-
     // first set them to spectator
-    if ((ent->client->sess.sessionState != STATE_SPECTATOR))
+    if ((ent->client->sess.sessionState != SESS_STATE_SPECTATOR))
     {
         return qfalse;
     }
 
     if (clientnum < 0 || clientnum >= level.maxclients)
     {
-        Com_Printf("Cmd_FollowClient_f: Bad clientnum %i\n", clientnum);
+        Com_Printf(CON_CHANNEL_SERVER,"Cmd_FollowClient_f: Bad clientnum %i\n", clientnum);
         return qfalse;
     }
 
@@ -404,38 +404,6 @@ qboolean Cmd_FollowClient_f(gentity_t *ent, int clientnum)
 
 /*
 =================
-StopFollowing
-
-If the client being followed leaves the game, or you just want to drop
-to free floating spectator mode
-
-=================
-*/
-//Drop it not needed
-/*
-void StopFollowing( gentity_t *ent ) {
-
-	vec3_t vieworigin;
-	vec3_t forward;
-	vec3_t up;
-
-	ent->client->pers.unknownStateVar = -1;
-	ent->client->pers.unknownStateVar2 = -1;
-	ent->client->sess.spectatorClient = -1;
-
-	if(ent->client->ps.unkPlayerStateVar1 & 2)
-	{
-		G_GetPlayerViewOrigin(ent->client->ps, vieworigin);
-		BG_GetPlayerViewDirection(ent->client->ps, forward, NULL, up);
-
-
-	}
-
-}
-*/
-
-/*
-=================
 StopFollowingOnDeath
 
 If the client being followed dies in game
@@ -447,7 +415,7 @@ __cdecl void StopFollowingOnDeath(gentity_t *ent)
 {
 
     if (ent->client->spectatorClient != -1)
-        svs.clients[ent->s.number].lastFollowedClient = ent->client->spectatorClient; //saving the last followed player
+        ent->client->lastFollowedClient = ent->client->spectatorClient; //saving the last followed player
 
     StopFollowing(ent);
 }
@@ -490,7 +458,7 @@ void G_SayTo(gentity_t *ent, gentity_t *other, int mode, int color, const char *
         return;
     }
 
-    if (ent->client->sess.sessionState != STATE_PLAYING && other->client->sess.sessionState == STATE_PLAYING && !g_deadChat->boolean)
+    if (ent->client->sess.sessionState != SESS_STATE_PLAYING && other->client->sess.sessionState == SESS_STATE_PLAYING && !g_deadChat->boolean)
     {
         return;
     }
@@ -585,6 +553,12 @@ __cdecl void G_Say(gentity_t *ent, gentity_t *target, int mode, const char *chat
         return;
     }
 
+    if (sv_disableChat->boolean == qtrue)
+    {
+        SV_GameSendServerCommand(ent->s.number, 0, "\x67 \"Chat messages disabled on this server\"");
+        return;
+    }
+
     switch (mode)
     {
     default:
@@ -641,7 +615,7 @@ __cdecl void G_Say(gentity_t *ent, gentity_t *target, int mode, const char *chat
         return;
 
     // echo the text to the console
-    Com_Printf("Say %s: %s\n", name, text);
+    Com_Printf(CON_CHANNEL_SERVER,"Say %s: %s\n", name, text);
 
     // send it to all the apropriate clients
     for (j = 0; j < level.maxclients; j++)
@@ -692,4 +666,49 @@ void G_AddChatRedirect(void (*rd_dest)(const char *, int, int))
         }
     }
     Com_Error(ERR_FATAL, "G_AddChatRedirect: Out of redirect handles. Increase MAX_REDIRECTDESTINATIONS to add more redirect destinations");
+}
+
+
+
+void __cdecl Svcmd_EntityList_f()
+{
+  signed int e;
+  gentity_t *check;
+
+  check = &g_entities[1];
+  e = 1;
+  while ( e < level.num_entities )
+  {
+    if ( check->r.inuse )
+    {
+      Com_Printf(CON_CHANNEL_DONT_FILTER, "%3i: ", e);
+      Com_Printf(CON_CHANNEL_DONT_FILTER, "'%s'", G_GetEntityTypeName(check));
+      if ( check->classname )
+      {
+        Com_Printf(CON_CHANNEL_DONT_FILTER, ", '%s'", SL_ConvertToString(check->classname));
+      }
+      Com_Printf(CON_CHANNEL_DONT_FILTER, "\n");
+    }
+    ++e;
+    ++check;
+  }
+}
+
+qboolean __cdecl ConsoleCommand()
+{
+  char *cmd;
+
+  cmd = Cmd_Argv(0);
+  if ( !Q_stricmp(cmd, "entitylist") )
+  {
+    Svcmd_EntityList_f();
+    return qtrue;
+  }
+  if ( !Q_stricmp(cmd, "say") )
+  {
+    char b[1024];
+    SV_GameSendServerCommand(-1, 0, va("%c \"GAME_SERVER\x15: %s\"", 101, SV_Cmd_Argsv(1, b, sizeof(b))));
+    return qtrue;
+  }
+  return qfalse;
 }

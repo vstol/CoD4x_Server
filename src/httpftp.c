@@ -75,17 +75,17 @@ static void FT_FreeRequest(ftRequest_t* request)
 	}
 	if(request->recvmsg.data != NULL)
 	{
-		Z_Free(request->recvmsg.data);
+		L_Free(request->recvmsg.data);
 		request->recvmsg.data = NULL;
 	}
 	if(request->sendmsg.data != NULL)
 	{
-		Z_Free(request->sendmsg.data);
+		L_Free(request->sendmsg.data);
 		request->sendmsg.data = NULL;
 	}
 	if(request->transfermsg.data != NULL)
 	{
-		Z_Free(request->transfermsg.data);
+		L_Free(request->transfermsg.data);
 		request->transfermsg.data = NULL;
 	}
 	if(request->socket >= 0)
@@ -98,7 +98,7 @@ static void FT_FreeRequest(ftRequest_t* request)
     NET_TcpCloseSocket(request->transfersocket);
 		request->transfersocket = -1;
 	}
-	Z_Free(request);
+	L_Free(request);
 }
 
 
@@ -116,7 +116,7 @@ static ftRequest_t* FT_CreateRequest(const char* address, const char* url)
 	size = sizeof(ftRequest_t);
 #endif
 
-	request = Z_Malloc(size);
+	request = L_Malloc(size);
 	if(request == NULL)
 		return NULL;
 
@@ -132,7 +132,7 @@ static ftRequest_t* FT_CreateRequest(const char* address, const char* url)
 	}
 
 	/* For proper terminating of string data +1 */
-	buf = Z_Malloc(INITIAL_BUFFERLEN +1);
+	buf = L_Malloc(INITIAL_BUFFERLEN +1);
 	if( buf == NULL)
 	{
 		FT_FreeRequest(request);
@@ -140,7 +140,7 @@ static ftRequest_t* FT_CreateRequest(const char* address, const char* url)
 	}
 	MSG_Init(&request->recvmsg, buf, INITIAL_BUFFERLEN);
 
-	buf = Z_Malloc(INITIAL_BUFFERLEN);
+	buf = L_Malloc(INITIAL_BUFFERLEN);
 	if( buf == NULL)
 	{
 		FT_FreeRequest(request);
@@ -231,7 +231,7 @@ static void FT_AddData(ftRequest_t* request, void* data, int len)
 	{
 		newsize = request->sendmsg.cursize + len;
 
-		newbuf = Z_Malloc(newsize);
+		newbuf = L_Malloc(newsize);
 		if(newbuf == NULL)
 		{
 			MSG_WriteData(&request->sendmsg, data, len);
@@ -239,7 +239,7 @@ static void FT_AddData(ftRequest_t* request, void* data, int len)
 		}
 		Com_Memcpy(newbuf, request->sendmsg.data, request->sendmsg.cursize);
 
-		Z_Free(request->sendmsg.data);
+		L_Free(request->sendmsg.data);
 		request->sendmsg.data = newbuf;
 		request->sendmsg.maxsize = newsize;
 	}
@@ -268,7 +268,7 @@ static int FT_SendData(ftRequest_t* request)
     }
 /*
     if(bytes < 0){
-      Com_Printf("FT_SendData: %s\n", errormsg);
+      Com_Printf(CON_CHANNEL_FILEDL,"FT_SendData: %s\n", errormsg);
     }
 */
 
@@ -320,7 +320,7 @@ int HTTP_TcpReceiveData( ftRequest_t *request) {
     ret = mbedtls_ssl_read( &request->tls->ssl, request->recvmsg.data + request->recvmsg.cursize, len );
 /*
     if(ret > 0)
-    Com_Printf("HTTPSMSG: %.*s", ret, request->recvmsg.data + request->recvmsg.cursize);
+    Com_Printf(CON_CHANNEL_FILEDL,"HTTPSMSG: %.*s", ret, request->recvmsg.data + request->recvmsg.cursize);
 */
   }
   if(ret > 0)
@@ -343,9 +343,9 @@ int HTTP_TcpReceiveData( ftRequest_t *request) {
   if(request->tls)
   {
     mbedtls_strerror(ret, errormsg, sizeof(errormsg));
-    Com_Printf("HTTP_TcpReceiveData: mbedtls_ssl_read returned %s [-0x%x]\n", errormsg, -ret );
+    Com_Printf(CON_CHANNEL_FILEDL,"HTTP_TcpReceiveData: mbedtls_ssl_read returned %s [-0x%x]\n", errormsg, -ret );
   }else{
-    Com_Printf("HTTP_TcpReceiveData: NET_Receive returned %s\n", errormsg );
+    Com_Printf(CON_CHANNEL_FILEDL,"HTTP_TcpReceiveData: NET_Receive returned %s\n", errormsg );
   }
   return -1;
 
@@ -374,16 +374,16 @@ static int FT_ReceiveData(ftRequest_t* request)
 	if (newsize)
 	{
 		/* For proper terminating of string data +1 */
-		newbuf = Z_Malloc(newsize +1);
+		newbuf = L_Malloc(newsize +1);
 		if(newbuf == NULL)
 		{
-      NET_TcpCloseSocket(request->socket);
-      request->socket = -1;
-      return -2;
+			NET_TcpCloseSocket(request->socket);
+			request->socket = -1;
+			return -2;
 		}
 		Com_Memcpy(newbuf, request->recvmsg.data, request->recvmsg.cursize);
 
-		Z_Free(request->recvmsg.data);
+		L_Free(request->recvmsg.data);
 		request->recvmsg.data = newbuf;
 		request->recvmsg.maxsize = newsize;
 	}
@@ -571,7 +571,7 @@ qboolean HTTP_BuildNewRequest( ftRequest_t* request, const char* method, msg_t* 
 	}
 	if(additionalheaderlines && additionalheaderlines[0])
 	{
-		Q_strcat(extheaderfields, sizeof(extheaderfields), additionalheaderlines);
+		Q_strncat(extheaderfields, sizeof(extheaderfields), additionalheaderlines);
 	}
 	Com_sprintf(getbuffer, sizeof(getbuffer),
 				"%s %s HTTP/1.1\r\n"
@@ -627,9 +627,9 @@ static qboolean HTTPSplitURL(const char* url, char* address, int lenaddress, cha
 	if (strchr(address, ':') == NULL) {
 		if(tls == qfalse)
 		{
-			Q_strcat(address, lenaddress, ":80");
+			Q_strncat(address, lenaddress, ":80");
 		}else{
-			Q_strcat(address, lenaddress, ":443");
+			Q_strncat(address, lenaddress, ":443");
 		}
 	}
 
@@ -689,7 +689,7 @@ static int HTTP_ProcessChunkedEncoding(ftRequest_t* request, qboolean connection
 			memmove(request->recvmsg.data + writeoffset, request->recvmsg.data + request->recvmsg.readcount, chunksize);
 			request->currentChunkLength += chunksize;
 			request->recvmsg.readcount += chunksize;
-			request->currentChunkReadOffset = request->recvmsg.readcount - request->headerLength;
+
 		}else if(connectionClosed){
 			return -1;
 		}else{
@@ -702,6 +702,7 @@ static int HTTP_ProcessChunkedEncoding(ftRequest_t* request, qboolean connection
 		{
 			return -1;
 		}
+		request->currentChunkReadOffset = request->recvmsg.readcount - request->headerLength;
 
 	}while(1);
 
@@ -722,7 +723,7 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 			/* Open the connection */
 			int res = NET_StringToAdr(request->address, &request->remote, NA_UNSPEC);
 			if(res <= 0){
-				Com_Printf("Unable to resolve hostname %s\n", request->address);
+				Com_Printf(CON_CHANNEL_FILEDL,"Unable to resolve hostname %s\n", request->address);
 				request->socket = -1;
 				return -1;
 			}
@@ -744,6 +745,10 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 		status = NET_TcpIsSocketReady(request->socket);
 		if(status == 0)
 		{
+			if(request->startTime + HTTP_CONNECTTIMEOUT < Sys_Milliseconds())
+			{
+				return -1;
+			}
 			return 0;
 		}
 		if(status < 0)
@@ -767,7 +772,7 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 			if( ret != MBEDTLS_ERR_SSL_WANT_READ &&	ret != MBEDTLS_ERR_SSL_WANT_WRITE )
 			{
 				mbedtls_strerror(ret, errormsg, sizeof(errormsg));
-				Com_Printf( "HTTP_SendReceiveData: mbedtls_ssl_handshake returned %s\n", errormsg );
+				Com_Printf(CON_CHANNEL_FILEDL, "HTTP_SendReceiveData: mbedtls_ssl_handshake returned %s\n", errormsg );
 				return -1;
 			}
 			return 0;
@@ -779,7 +784,7 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 		{
 			char vrfy_buf[512];
 			mbedtls_x509_crt_verify_info( vrfy_buf, sizeof( vrfy_buf ), "", flags );
-			Com_Printf( "The TLS host verification has failed\n%s\n", vrfy_buf);
+			Com_Printf(CON_CHANNEL_FILEDL, "The TLS host verification has failed\n%s\n", vrfy_buf);
         	return -1;
 		}
 	}
@@ -791,7 +796,7 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 
 		if(status < 0)
 		{
-	//      Com_DPrintf("FT_SendData error\n");
+	//      Com_DPrintf(CON_CHANNEL_FILEDL,"FT_SendData error\n");
 			return -1;
 		}
 		
@@ -801,7 +806,7 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 	status = FT_ReceiveData(request);
 	if(status == -2)
 	{
-	//    Com_DPrintf("FT_ReceiveData error\n");
+	//    Com_DPrintf(CON_CHANNEL_FILEDL,"FT_ReceiveData error\n");
 		return -1; //bail out
 	}
 
@@ -852,7 +857,7 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 		line = MSG_ReadStringLine(&request->recvmsg, stringlinebuf, sizeof(stringlinebuf));
 		if(Q_stricmpn(line,"HTTP/1.",7) || isInteger(line + 7, 2) == qfalse || isInteger(line + 9, 4) == qfalse)
 		{
-			Com_PrintError("HTTP_ReceiveData: Packet is corrupt!\nDebug: %s\n", line);
+			Com_PrintError(CON_CHANNEL_FILEDL,"HTTP_ReceiveData: Packet is corrupt!\nDebug: %s\n", line);
 
 			return -1;
 		}
@@ -860,7 +865,7 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 		request->version = atoi(line + 7);
 		if (request->version < 0 || request->version > 9)
 		{
-			Com_PrintError("HTTP_ReceiveData: Packet has unknown HTTP version 1.%d !\n", request->version);
+			Com_PrintError(CON_CHANNEL_FILEDL,"HTTP_ReceiveData: Packet has unknown HTTP version 1.%d !\n", request->version);
 
 			return -1;
 		}
@@ -889,7 +894,7 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 			{
 				if(isInteger(line + 15, 0) == qfalse)
 				{
-					Com_PrintError("Sec_GetHTTPPacket: Packet is corrupt!\nDebug: %s\n", line);
+					Com_PrintError(CON_CHANNEL_FILEDL,"Sec_GetHTTPPacket: Packet is corrupt!\nDebug: %s\n", line);
 					return -1;
 				}
 				request->contentLengthArrived = 1;
@@ -925,9 +930,9 @@ int HTTP_SendReceiveData(ftRequest_t* request)
 
 					if(tls)
 					{
-						Com_Printf("Received redirect request to https://%s%s\n", request->address, request->url);
+						Com_Printf(CON_CHANNEL_FILEDL,"Received redirect request to https://%s%s\n", request->address, request->url);
 					}else{
-						Com_Printf("Received redirect request to http://%s%s\n", request->address, request->url);
+						Com_Printf(CON_CHANNEL_FILEDL,"Received redirect request to http://%s%s\n", request->address, request->url);
 					}
 
 					request->socket = NET_TcpClientConnect(request->address);
@@ -1014,7 +1019,7 @@ int mbedtls_net_recv( void *ctx, unsigned char *buf, size_t len )
         return( MBEDTLS_ERR_NET_INVALID_CONTEXT );
     }
     ret = NET_TcpClientGetData( fd, buf, len, NULL, 0);
-//    Com_Printf("BIO receive %d bytes\n", ret);
+//    Com_Printf(CON_CHANNEL_FILEDL,"BIO receive %d bytes\n", ret);
     if( ret < 0 )
     {
       if(ret == NET_WANT_READ)
@@ -1038,7 +1043,7 @@ int mbedtls_net_send( void *ctx, const unsigned char *buf, size_t len )
     int ret;
     int fd = (int)ctx;
 
-//    Com_Printf("Calling BIO send - Len: %d FD: %d\n", len, fd);
+//    Com_Printf(CON_CHANNEL_FILEDL,"Calling BIO send - Len: %d FD: %d\n", len, fd);
 
     if( fd < 0 )
         return( MBEDTLS_ERR_NET_INVALID_CONTEXT );
@@ -1046,7 +1051,7 @@ int mbedtls_net_send( void *ctx, const unsigned char *buf, size_t len )
     char errormsg[1024];
 
     ret = NET_TcpSendData( fd, buf, len, errormsg, sizeof(errormsg) );
-//    Com_Printf("BIO sent %d bytes\n", ret);
+//    Com_Printf(CON_CHANNEL_FILEDL,"BIO sent %d bytes\n", ret);
 
     if( ret < 0 )
     {
@@ -1066,7 +1071,7 @@ int mbedtls_net_send( void *ctx, const unsigned char *buf, size_t len )
 
 static void HTTPS_DPrintf( void *ctx, int level, const char *file, int line, const char *str )
 {
-    Com_PrintWarning( "%s:%04d: %s", file, line, str );
+    Com_PrintWarning(CON_CHANNEL_FILEDL, "%s:%04d: %s", file, line, str );
 }
 
 
@@ -1093,11 +1098,11 @@ static int HTTPS_SetupCAs()
   byte *ca_cert;
   char errormsg[1024];
 
-  Sys_EnterCriticalSection(CRIT_HTTPS);
+  Sys_EnterCriticalSection(CRITSECT_HTTPS);
 
   if(ca_loaded)
   {
-    Sys_LeaveCriticalSection(CRIT_HTTPS);
+    Sys_LeaveCriticalSection(CRITSECT_HTTPS);
     return 1;
   }
 
@@ -1107,28 +1112,28 @@ static int HTTPS_SetupCAs()
 
   if(ca_cert_size <= 0)
   {
-    Com_Printf("Couldn't open file %s\n", "ca/ca-bundle.crt");
+    Com_Printf(CON_CHANNEL_FILEDL,"Couldn't open file %s\n", "ca/ca-bundle.crt");
   }else{
     ret = mbedtls_x509_crt_parse( &cacert, ca_cert, ca_cert_size +1);
     if( ret < 0 )
     {
         mbedtls_strerror(ret, errormsg, sizeof(errormsg));
-        Com_Printf( "HTTPSRequest failed: mbedtls_x509_crt_parse couldn't parse any returned %s\n", errormsg);
+        Com_Printf(CON_CHANNEL_FILEDL, "HTTPSRequest failed: mbedtls_x509_crt_parse couldn't parse any returned %s\n", errormsg);
         FS_FreeFile(ca_cert);
-        Sys_LeaveCriticalSection(CRIT_HTTPS);
+        Sys_LeaveCriticalSection(CRITSECT_HTTPS);
         return 0;
     }
     if( ret > 0 )
     {
-        Com_Printf( "HTTPSRequest failed: mbedtls_x509_crt_parse failed to parse %d certificates\n", ret);
-        FS_FreeFile(ca_cert);
-        Sys_LeaveCriticalSection(CRIT_HTTPS);
-        return 0;
+        Com_Printf(CON_CHANNEL_FILEDL, "HTTPSRequest failed: mbedtls_x509_crt_parse failed to parse %d certificates\n", ret);
+//        FS_FreeFile(ca_cert);
+//        Sys_LeaveCriticalSection(CRITSECT_HTTPS);
+//        return 0;
     }
     FS_FreeFile(ca_cert);
   }
   ca_loaded = 1;
-  Sys_LeaveCriticalSection(CRIT_HTTPS);
+  Sys_LeaveCriticalSection(CRITSECT_HTTPS);
   return 1;
 }
 
@@ -1152,7 +1157,7 @@ static int HTTPS_Prepare( ftRequest_t* request, const char* commonname )
 	                           strlen( HTTP_CLIENTNAME ) ) ) != 0 )
 	{
       mbedtls_strerror(ret, errormsg, sizeof(errormsg));
-	    Com_Printf( "HTTPSRequest failed: mbedtls_ctr_drbg_seed returned %s\n", errormsg);
+	    Com_Printf(CON_CHANNEL_FILEDL, "HTTPSRequest failed: mbedtls_ctr_drbg_seed returned %s\n", errormsg);
 	    goto failure;
 	}
 
@@ -1162,7 +1167,7 @@ static int HTTPS_Prepare( ftRequest_t* request, const char* commonname )
                 MBEDTLS_SSL_PRESET_DEFAULT ) ) != 0 )
 	{
     mbedtls_strerror(ret, errormsg, sizeof(errormsg));
-    Com_Printf( "HTTPSRequest failed: mbedtls_ssl_config_defaults returned %s\n", errormsg );
+    Com_Printf(CON_CHANNEL_FILEDL, "HTTPSRequest failed: mbedtls_ssl_config_defaults returned %s\n", errormsg );
     goto failure;
 	}
 
@@ -1174,14 +1179,14 @@ static int HTTPS_Prepare( ftRequest_t* request, const char* commonname )
 
 	if( mbedtls_ssl_setup( &request->tls->ssl, &request->tls->conf ) != 0 )
 	{
-			Com_Printf( "HTTPSRequest failed: mbedtls_ssl_setup failed\n");
+			Com_Printf(CON_CHANNEL_FILEDL, "HTTPSRequest failed: mbedtls_ssl_setup failed\n");
       goto failure;
   }
 
 	if( ( ret = mbedtls_ssl_set_hostname( &request->tls->ssl, commonname ) ) != 0 )
 	{
       mbedtls_strerror(ret, errormsg, sizeof(errormsg));
-	    Com_Printf( "HTTPSRequest failed: mbedtls_ssl_set_hostname returned %s\n", errormsg);
+	    Com_Printf(CON_CHANNEL_FILEDL, "HTTPSRequest failed: mbedtls_ssl_set_hostname returned %s\n", errormsg);
 	    goto failure;
 	}
 
@@ -1212,9 +1217,9 @@ ftRequest_t* HTTPRequest(const char* url, const char* method, msg_t* msg, const 
 	qboolean tls = HTTPSplitURL(url, address, sizeof(address), wwwpath, sizeof(wwwpath));
 	if(tls)
 	{
-		Com_DPrintf("HTTPRequest: Open URL https://%s%s\n", address, wwwpath);
+		Com_DPrintf(CON_CHANNEL_FILEDL,"HTTPRequest: Open URL https://%s%s\n", address, wwwpath);
 	}else{
-		Com_DPrintf("HTTPRequest: Open URL http://%s%s\n", address, wwwpath);
+		Com_DPrintf(CON_CHANNEL_FILEDL,"HTTPRequest: Open URL http://%s%s\n", address, wwwpath);
 	}
 	if(strlen(address) < 2)
 		return NULL;
@@ -1289,7 +1294,7 @@ static void FTP_SplitURL(const char* url, char* address, int lenaddress, char* p
 	}
 	/* See if we have a port for our address given. If not complete this. */
 	if (strchr(address, ':') == NULL) {
-		Q_strcat(address, lenaddress, ":21");
+		Q_strncat(address, lenaddress, ":21");
 	}
 	/* In case we had no login we are done */
 	if(charloc == NULL)
@@ -1323,7 +1328,7 @@ static ftRequest_t* FTP_DLRequest(const char* url)
 
 	if(strlen(address) < 2)
 		return NULL;
-	//Com_Printf("Connecting to: %s path: %s user: %s passwd: %s\n", address, ftppath, user, passwd);
+	//Com_Printf(CON_CHANNEL_FILEDL,"Connecting to: %s path: %s user: %s passwd: %s\n", address, ftppath, user, passwd);
 	request = FT_CreateRequest(address, ftppath);
 
 	if(request == NULL)
@@ -1489,14 +1494,14 @@ static int FTP_ReceiveData(ftRequest_t* request)
 
 	if (newsize)
 	{
-		newbuf = Z_Malloc(newsize +1);
+		newbuf = L_Malloc(newsize +1);
 		if(newbuf == NULL)
 		{
 			return -1;
 		}
 		Com_Memcpy(newbuf, request->transfermsg.data, request->transfermsg.cursize);
 
-		Z_Free(request->transfermsg.data);
+		L_Free(request->transfermsg.data);
 		request->transfermsg.data = newbuf;
 		request->transfermsg.maxsize = newsize;
 	}
@@ -1539,7 +1544,7 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 			/* Open the connection */
 			int res = NET_StringToAdr(request->address, &request->remote, NA_UNSPEC);
 			if(res <= 0){
-				Com_Printf("Unable to resolve hostname %s\n", request->address);
+				Com_Printf(CON_CHANNEL_FILEDL,"Unable to resolve hostname %s\n", request->address);
 				request->socket = -1;
 				return -1;
 			}
@@ -1594,9 +1599,9 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 		request->code = atoi(line);
 
 		if(request->stage > 60)
-			Com_DPrintf("\n");
+			Com_DPrintf(CON_CHANNEL_FILEDL,"\n");
 
-		Com_DPrintf("Response Code = %d\n", request->code);
+		Com_DPrintf(CON_CHANNEL_FILEDL,"Response Code = %d\n", request->code);
 
 		if (request->stage < 0)
 		{
@@ -1610,10 +1615,10 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 				if(request->stage == 0)
 				{
 					// Initial OK response received /
-					Com_DPrintf("FTP_SendReceiveData: Inital OK response received\n");
+					Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Inital OK response received\n");
 					request->stage = 1;
 				}else {
-					Com_PrintWarning("\nFTP_SendReceiveData: Received: %s - Should not happen!\n", line);
+					Com_PrintWarning(CON_CHANNEL_FILEDL,"\nFTP_SendReceiveData: Received: %s - Should not happen!\n", line);
 				}
 				break;
 			case 202:
@@ -1621,41 +1626,41 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 				{
 					request->stage = 21;
 				}else {
-					Com_Printf("\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
+					Com_Printf(CON_CHANNEL_FILEDL,"\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
 					request->stage = -20;
 				}
 				break;
 			case 331:
 				if(request->stage == 10)
 				{
-					Com_DPrintf("FTP_SendReceiveData: Need Password\n");
+					Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Need Password\n");
 					request->stage = 11;
 
 				}else if(request->stage == 16){
-					Com_DPrintf("FTP_SendReceiveData: Need Password\n");
+					Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Need Password\n");
 					request->stage = 17;
 				}else {
-					Com_Printf("FTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
+					Com_Printf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
 					request->stage = -20;
 				}
 				break;
 			case 332:
 				if(request->stage == 10 || request->stage == 12)
 				{
-					Com_DPrintf("FTP_SendReceiveData: Need Account\n");
+					Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Need Account\n");
 					request->stage = 15;
 				}else {
-					Com_Printf("\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
+					Com_Printf(CON_CHANNEL_FILEDL,"\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
 					request->stage = -20;
 				}
 				break;
 			case 230:
 				if (request->stage <= 20)
 				{
-					Com_DPrintf("FTP_SendReceiveData: Logged in OK\n");
+					Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Logged in OK\n");
 					request->stage = 21;
 				}else {
-					Com_Printf("\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
+					Com_Printf(CON_CHANNEL_FILEDL,"\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
 					request->stage = -20;
 				}
 				break;
@@ -1665,7 +1670,7 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 					FTP_GetPassiveAddress(line, &pasvadr);
 					if(pasvadr.type == NA_IP)
 					{
-						Com_DPrintf("FTP_SendReceiveData: Entering Passive Mode at %s OK\n", NET_AdrToString(&pasvadr));
+						Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Entering Passive Mode at %s OK\n", NET_AdrToString(&pasvadr));
 						request->transfersocket = NET_TcpClientConnect(NET_AdrToString(&pasvadr));
 						if(request->transfersocket < 0)
 						{
@@ -1674,12 +1679,12 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 						}
 						request->stage = 41;
 					}else {
-						Com_PrintWarning("FTP_SendReceiveData: Couldn't read the address/port of passive mode response\n");
+						Com_PrintWarning(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Couldn't read the address/port of passive mode response\n");
 						return -1;
 					}
 
 				}else {
-					Com_Printf("\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
+					Com_Printf(CON_CHANNEL_FILEDL,"\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
 					request->stage = -20;
 				}
 				break;
@@ -1689,7 +1694,7 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 					FTP_GetExtendedPassiveAddress(line, request->address, &pasvadr);
 					if(pasvadr.type == NA_IP || pasvadr.type == NA_IP6)
 					{
-						Com_DPrintf("FTP_SendReceiveData: Entering Extended Passive Mode at %s OK\n", NET_AdrToString(&pasvadr));
+						Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Entering Extended Passive Mode at %s OK\n", NET_AdrToString(&pasvadr));
 						request->transfersocket = NET_TcpClientConnect(NET_AdrToString(&pasvadr));
 						if(request->transfersocket < 0)
 						{
@@ -1698,12 +1703,12 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 						}
 						request->stage = 41;
 					}else {
-						Com_PrintWarning("FTP_SendReceiveData: Couldn't read the address/port of passive mode response\n");
+						Com_PrintWarning(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Couldn't read the address/port of passive mode response\n");
 						return -1;
 					}
 
 				}else {
-					Com_Printf("\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
+					Com_Printf(CON_CHANNEL_FILEDL,"\nFTP_SendReceiveData: Received unexpected response: %s - Will abort!\n", line);
 					request->stage = -20;
 				}
 				break;
@@ -1711,10 +1716,10 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 				if(request->stage == 50)
 				{
 					bytes = atoi(&line[4]);
-					Com_DPrintf("FTP_SendReceiveData: Requested file will have %d bytes\n", bytes);
+					Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Requested file will have %d bytes\n", bytes);
 					if(bytes < 1 || bytes > 1024*1024*1024)
 					{
-						Com_PrintWarning("FTP_SendReceiveData: Requested file exceeds %d bytes.\n", 1024*1024*1024);
+						Com_PrintWarning(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Requested file exceeds %d bytes.\n", 1024*1024*1024);
 
 					}
 					request->finallen = bytes;
@@ -1722,10 +1727,10 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 					request->headerLength = 0;
 					request->transfertotalreceivedbytes = 0;
 
-					buf = Z_Malloc(INITIAL_BUFFERLEN +1);
+					buf = L_Malloc(INITIAL_BUFFERLEN +1);
 					if( buf == NULL)
 					{
-						Com_PrintWarning("FTP_SendReceiveData: Failed to allocate %d bytes for download file!\n", bytes);
+						Com_PrintWarning(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Failed to allocate %d bytes for download file!\n", bytes);
 						return -1;
 					}
 					MSG_Init(&request->transfermsg, buf, INITIAL_BUFFERLEN);
@@ -1738,7 +1743,7 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 			case 125:
 				if (request->stage == 60) {
 					request->stage = 61;
-					Com_DPrintf("FTP_SendReceiveData: Begin File Transfer\n");
+					Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Begin File Transfer\n");
 				}
 				break;
 			case 226:
@@ -1749,30 +1754,30 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 			case 221:
 				if(request->stage < 10000)
 				{
-					Com_Printf("\nThe FTP server closed the control connection before the transfer was completed!\n");
+					Com_Printf(CON_CHANNEL_FILEDL,"\nThe FTP server closed the control connection before the transfer was completed!\n");
 					request->stage = -1;
 				}
 				break;
 			case 228:
-				Com_Printf( "\nLong Passive Mode not supported and not requested!\n" );
+				Com_Printf(CON_CHANNEL_FILEDL, "\nLong Passive Mode not supported and not requested!\n" );
 				request->stage = -20;
 				break;
 
 			case 120:
-				Com_Printf( "The FTP server is not ready at the moment!\n" );
+				Com_Printf(CON_CHANNEL_FILEDL, "The FTP server is not ready at the moment!\n" );
 				request->stage = -20;
 				break;
 			case 231:
 				if(request->stage < 10000)
 				{
-					Com_Printf("\nThe FTP server logged us out before the transfer was completed!\n");
+					Com_Printf(CON_CHANNEL_FILEDL,"\nThe FTP server logged us out before the transfer was completed!\n");
 					request->stage = -20;
 				}
 				break;
 			case 350:
 				if(request->stage < 10000)
 				{
-					Com_Printf("\nThe FTP server returned \'%s\' before the transfer was completed. Must not happen!\n", line);
+					Com_Printf(CON_CHANNEL_FILEDL,"\nThe FTP server returned \'%s\' before the transfer was completed. Must not happen!\n", line);
 					request->stage = -20;
 				}
 				break;
@@ -1785,20 +1790,20 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 			case 503:
 				if (request->stage == 32) {
 					request->stage = 35;
-					Com_DPrintf("FTP_SendReceiveData: Command EPSV is not implemented on FTP server. Trying PASV...\n");
+					Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: Command EPSV is not implemented on FTP server. Trying PASV...\n");
 					break;
 				}else if (request->stage == 36) {
-					Com_Printf("FTP_SendReceiveData: FTP Server does not support passive mode. Request failed!\n");
+					Com_Printf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: FTP Server does not support passive mode. Request failed!\n");
 					request->stage = -10;
 				}
 			default:
 				if (request->code >= 200 && request->code < 300 && request->stage >= 30){
-					Com_DPrintf("\n");
-					Com_DPrintf("FTP_SendReceiveData: %s\n", line);
+					Com_DPrintf(CON_CHANNEL_FILEDL,"\n");
+					Com_DPrintf(CON_CHANNEL_FILEDL,"FTP_SendReceiveData: %s\n", line);
 					request->stage ++;
 					break;
 				}else if (request->code >= 400) {
-					Com_Printf("\nThe FTP server connection got ended with the message: %s\n", line);
+					Com_Printf(CON_CHANNEL_FILEDL,"\nThe FTP server connection got ended with the message: %s\n", line);
 					request->stage = -20;
 				}
 				break;
@@ -1892,14 +1897,14 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 				request->stage = 10000;
 				break;
 			}else {
-				Com_Printf("\nThe FTP server closed the data connection before the transfer was completed!\n");
-				Com_Printf("Expected %d bytes but got %d bytes\n", request->finallen, request->transfertotalreceivedbytes);
+				Com_Printf(CON_CHANNEL_FILEDL,"\nThe FTP server closed the data connection before the transfer was completed!\n");
+				Com_Printf(CON_CHANNEL_FILEDL,"Expected %d bytes but got %d bytes\n", request->finallen, request->transfertotalreceivedbytes);
 				request->stage = -20;
 				break;
 			}
 		case -20:
 			request->transferactive = qfalse;
-			Com_Printf("\nFTP File Transfer has failed!\n");
+			Com_Printf(CON_CHANNEL_FILEDL,"\nFTP File Transfer has failed!\n");
 		case -10:
 			request->transferactive = qfalse;
 			if(request->socket >= 0 )
@@ -1911,7 +1916,7 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 			break;
 
 		case -1:
-			Com_Printf("\n");
+			Com_Printf(CON_CHANNEL_FILEDL,"\n");
 			return -1;
 			break;
 
@@ -1928,20 +1933,20 @@ static int FTP_SendReceiveData(ftRequest_t* request)
 			}
 			if(request->recvmsg.data != NULL)
 			{
-				Z_Free(request->recvmsg.data);
+				L_Free(request->recvmsg.data);
 				request->recvmsg.data = NULL;
 			}
 			if(request->transfermsg.data == NULL)
 			{
 				request->stage = -1;
-				Com_PrintError("\nReceived complete message but message buffer is NULL!\n");
+				Com_PrintError(CON_CHANNEL_FILEDL,"\nReceived complete message but message buffer is NULL!\n");
 				return -1;
 			}
 			request->stage = 10001;
 			request->code = 200;
 			Q_strncpyz(request->status, "OK", sizeof(request->status));
       request->transferactive = qfalse;
-      Com_Printf("FTP File transfer completed\n");
+      Com_Printf(CON_CHANNEL_FILEDL,"FTP File transfer completed\n");
       return 1;
 
     case 10001:
@@ -1985,7 +1990,7 @@ int HTTPServer_ReadMessage(netadr_t* from, msg_t* msg, ftRequest_t* request)
 			newsize = 2 * request->recvmsg.maxsize + msg->cursize;
 		}
 
-		newbuf = Z_Malloc(newsize);
+		newbuf = L_Malloc(newsize);
 		if(newbuf == NULL)
 		{
 			return -1;
@@ -1993,7 +1998,7 @@ int HTTPServer_ReadMessage(netadr_t* from, msg_t* msg, ftRequest_t* request)
 
 		Com_Memcpy(newbuf, request->recvmsg.data, request->recvmsg.cursize);
 
-		Z_Free(request->recvmsg.data);
+		L_Free(request->recvmsg.data);
 		request->recvmsg.data = newbuf;
 		request->recvmsg.maxsize = newsize;
 
@@ -2033,7 +2038,7 @@ int HTTPServer_ReadMessage(netadr_t* from, msg_t* msg, ftRequest_t* request)
 			request->mode = HTTP_GET;
 			line += 4;
 		}else {
-			Com_DPrintf("Invalid HTTP method from %s\n", NET_AdrToString(from));
+			Com_DPrintf(CON_CHANNEL_FILEDL,"Invalid HTTP method from %s\n", NET_AdrToString(from));
 			return -1;
 		}
 
@@ -2052,7 +2057,7 @@ int HTTPServer_ReadMessage(netadr_t* from, msg_t* msg, ftRequest_t* request)
 
 		if(Q_stricmpn(line,"HTTP/1.",7) || isInteger(line + 7, 2) == qfalse || isInteger(line + 9, 4) == qfalse)
 		{
-			Com_PrintError("HTTP_ReceiveData: Packet is corrupt!\nDebug: %s\n", line);
+			Com_PrintError(CON_CHANNEL_FILEDL,"HTTP_ReceiveData: Packet is corrupt!\nDebug: %s\n", line);
 
 			return -1;
 		}
@@ -2060,7 +2065,7 @@ int HTTPServer_ReadMessage(netadr_t* from, msg_t* msg, ftRequest_t* request)
 		request->version = atoi(line + 7);
 		if (request->version != 0 && request->version != 1)
 		{
-			Com_PrintError("HTTP_ReceiveData: Packet has unknown HTTP version 1.%d !\n", request->version);
+			Com_PrintError(CON_CHANNEL_FILEDL,"HTTP_ReceiveData: Packet has unknown HTTP version 1.%d !\n", request->version);
 
 			return -1;
 		}
@@ -2074,7 +2079,7 @@ int HTTPServer_ReadMessage(netadr_t* from, msg_t* msg, ftRequest_t* request)
 			{
 				if(isInteger(line + 15, 0) == qfalse)
 				{
-					Com_PrintError("Sec_GetHTTPPacket: Packet is corrupt!\nDebug: %s\n", line);
+					Com_PrintError(CON_CHANNEL_FILEDL,"Sec_GetHTTPPacket: Packet is corrupt!\nDebug: %s\n", line);
 					return -1;
 				}
 				request->contentLength = atoi(line + 15);
@@ -2127,8 +2132,8 @@ int HTTPServer_ReadMessage(netadr_t* from, msg_t* msg, ftRequest_t* request)
 		/* Still needing bytes... */
 		return 0;
 	}
-//	Com_Printf("^6HTTP-Message is complete!\n");
-//	Com_Printf("^6Received: Version: HTTP/1.%d   Method: %d   Content-Length: %d   URL: %s\n", request->version, request->mode, request->contentLength, request->url);
+//	Com_Printf(CON_CHANNEL_FILEDL,"^6HTTP-Message is complete!\n");
+//	Com_Printf(CON_CHANNEL_FILEDL,"^6Received: Version: HTTP/1.%d   Method: %d   Content-Length: %d   URL: %s\n", request->version, request->mode, request->contentLength, request->url);
 	return 1;
 }
 
@@ -2148,14 +2153,14 @@ void HTTPServer_BuildMessage( ftRequest_t* request, char* status, char* message,
 					  "\r\n", status, len, sessionkey);
 
 
-	newbuf = Z_Malloc(headerlen + len);
+	newbuf = L_Malloc(headerlen + len);
 	if(newbuf == NULL)
 	{
 		return;
 	}
 	if(request->sendmsg.data)
 	{
-		Z_Free(request->sendmsg.data);
+		L_Free(request->sendmsg.data);
 	}
 	request->sendmsg.data = newbuf;
 	request->sendmsg.maxsize = headerlen + len;
@@ -2203,7 +2208,7 @@ void HTTPServer_BuildResponse(ftRequest_t* request, char* sessionkey, httpPostVa
 	if(hasmessage)
 	{
 		HTTPServer_BuildMessage( request, "200 OK", (char*)msg.data, msg.cursize, sessionkey);
-		Z_Free(msg.data);
+		L_Free(msg.data);
 		return;
 	}
 	HTTPServer_BuildMessage( request, "403 FORBIDDEN", "Error: Forbidden", strlen("Error: Forbidden"), sessionkey);
@@ -2391,7 +2396,7 @@ int HTTPServer_Event(netadr_t* from, msg_t* msg, int connectionId)
 	{
 		HTTPServer_ReadSessionId(request, sessionkey, sizeof(sessionkey));
 		HTTP_ParseFormDataBody((char*)request->recvmsg.data + request->headerLength, values);
-		Com_Printf("SessionID is: %s\n",  sessionkey);
+		Com_Printf(CON_CHANNEL_FILEDL,"SessionID is: %s\n",  sessionkey);
 
 		HTTPServer_BuildResponse( request, sessionkey, values);
 
@@ -2508,7 +2513,7 @@ ftRequest_t* FileDownloadRequest( const char* url)
 		case FT_PROTO_HTTP:
 			return HTTPRequest(url, "GET", NULL, NULL);
 		default:
-			Com_PrintError("Unsupported File Transfer Protocol in url: %s!\n", url);
+			Com_PrintError(CON_CHANNEL_FILEDL,"Unsupported File Transfer Protocol in url: %s!\n", url);
 			return NULL;
 	}
 	return NULL;
@@ -2631,7 +2636,7 @@ const char* FileDownloadGenerateProgress( ftRequest_t* request )
 
 	do {
 		state = FileDownloadSendReceive(handle);
-		Com_Printf("%s", FileDownloadGenerateProgress( handle ));
+		Com_Printf(CON_CHANNEL_FILEDL,"%s", FileDownloadGenerateProgress( handle ));
 		Sys_SleepUSec(20000);
 	} while (state == 0);
 
@@ -2650,13 +2655,13 @@ void DL_Test_CB(const char* filename, qboolean success, ftRequest_t *handle)
 	int before;
 	if(success == qfalse)
 	{
-		Com_Printf("^1Transfer of %s has failed...\n", filename);
+		Com_Printf(CON_CHANNEL_FILEDL,"^1Transfer of %s has failed...\n", filename);
 		return;
 	}else {
-		Com_Printf("^2Transfer successful...\n");
+		Com_Printf(CON_CHANNEL_FILEDL,"^2Transfer successful...\n");
 		before = Sys_Milliseconds();
 		FS_WriteFile(filename, handle->recvmsg.data, handle->recvmsg.cursize);
-		Com_Printf("Filewrite took %d msec", Sys_Milliseconds() - before);
+		Com_Printf(CON_CHANNEL_FILEDL,"Filewrite took %d msec", Sys_Milliseconds() - before);
 	}
 
 }

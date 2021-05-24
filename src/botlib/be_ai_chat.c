@@ -35,7 +35,7 @@ If you have questions concerning this license or the applicable additional terms
  *
  *****************************************************************************/
 #include <ctype.h>
-#include "../q_shared.h"
+#include "game_inc.h"
 //#include "../server/server.h"
 #include "l_memory.h"
 #include "l_libvar.h"
@@ -1076,15 +1076,15 @@ bot_randomlist_t *BotLoadRandomStrings( char *filename ) {
 // Changes Globals:		-
 //===========================================================================
 char *RandomString( char *name ) {
-	bot_randomlist_t *random;
+	bot_randomlist_t *random_;
 	bot_randomstring_t *rs;
 	int i;
 
-	for ( random = randomstrings; random; random = random->next )
+	for ( random_ = randomstrings; random_; random_ = random_->next )
 	{
-		if ( !strcmp( random->string, name ) ) {
-			i = random() * random->numstrings;
-			for ( rs = random->firstrandomstring; rs; rs = rs->next )
+		if ( !strcmp( random_->string, name ) ) {
+			i = random() * random_->numstrings;
+			for ( rs = random_->firstrandomstring; rs; rs = rs->next )
 			{
 				if ( --i < 0 ) {
 					break;

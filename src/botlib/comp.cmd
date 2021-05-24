@@ -1,9 +1,10 @@
+@echo off
 gcc.exe -D BOTLIB -c *.c
 REM gcc.exe -c ..\q_math.c
 REM gcc.exe -c ..\qshared.c
 REM gcc.exe -c ..\qvsnprintf.c
 echo Linking
-ar cr ../../lib/libbot_win32.a *.o
+ar rcs ../../lib/libbot.a *.o
 echo Cleaning up
 del *.o
-pause
+:: pause

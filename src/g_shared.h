@@ -26,11 +26,9 @@
 #include "entity.h"
 #include "player.h"
 #include "cvar.h"
-
+#include "cm_public.h"
 #include "sys_cod4defs.h"
 
-#define level_ADDR 0x8370440
-#define level (*((level_locals_t *)(level_ADDR)))
 
 /* Unfortunately, this can't be used to check\get gametypes... At least for now... */
 /*#define g_gametypes ((gametypes_t*)(0x8583bc0))*/
@@ -41,6 +39,23 @@
 //
 #define MAX_SPAWN_VARS 64
 #define MAX_SPAWN_VARS_CHARS 2048
+
+/*enum sessionState_t{
+SESS_STATE_PLAYING = 0,
+SESS_STATE_DEAD = 1,
+SESS_STATE_SPECTATOR = 2,
+SESS_STATE_INTERMISSION = 3
+};*/
+
+#define SAY_ALL 0
+#define SAY_TEAM 1
+#define SAY_TELL 2
+
+#define MAX_STATUS_ICONS 8
+#define STATUS_ICON_CS 2259
+#define HEAD_ICON_CS 2267
+#define MAX_HEAD_ICONS 15
+
 
 typedef struct
 {
@@ -57,13 +72,6 @@ typedef struct
     int numSpawnVarChars;
     char spawnVarChars[2048];
 } SpawnVar;
-
-typedef struct
-{
-    void *name;
-    int offset;
-    int type;
-} cspField_t;
 
 typedef struct
 {
@@ -166,7 +174,31 @@ typedef struct
     float compassMapWorldSize[2];
     float compassNorth[2];
     struct scr_vehicle_s *vehicles;
+    int framerate;
 } level_locals_t;
+
+extern level_locals_t level;
+
+struct turretInfo_s
+{
+  int inuse;
+  int flags;
+  int fireTime;
+  vec2_t arcmin;
+  vec2_t arcmax;
+  float dropPitch;
+  int stance;
+  int prevStance;
+  int fireSndDelay;
+  vec3_t userOrigin;
+  float playerSpread;
+  float pitchCap;
+  int triggerDown;
+  char fireSnd;
+  char fireSndPlayer;
+  char stopSnd;
+  char stopSndPlayer;
+};
 
 /* Max count = 32, started at 0x08583C10 */
 /*typedef struct gametype_t
@@ -213,6 +245,9 @@ typedef struct
 #define CS_VOTE_STRING 14
 #define CS_VOTE_YES 15
 #define CS_VOTE_NO 16
+
+#define POF_PLAYER 4
+
 /*
 #define CS_GAME_VERSION         12
 #define CS_LEVEL_START_TIME     13      // so the timer only shows the current level
@@ -360,6 +395,29 @@ static const char *g_HitLocNames[] =
 };
 
 */
+enum hitLocation_t
+{
+  HITLOC_NONE = 0x0,
+  HITLOC_HELMET = 0x1,
+  HITLOC_HEAD = 0x2,
+  HITLOC_NECK = 0x3,
+  HITLOC_TORSO_UPR = 0x4,
+  HITLOC_TORSO_LWR = 0x5,
+  HITLOC_R_ARM_UPR = 0x6,
+  HITLOC_L_ARM_UPR = 0x7,
+  HITLOC_R_ARM_LWR = 0x8,
+  HITLOC_L_ARM_LWR = 0x9,
+  HITLOC_R_HAND = 0xA,
+  HITLOC_L_HAND = 0xB,
+  HITLOC_R_LEG_UPR = 0xC,
+  HITLOC_L_LEG_UPR = 0xD,
+  HITLOC_R_LEG_LWR = 0xE,
+  HITLOC_L_LEG_LWR = 0xF,
+  HITLOC_R_FOOT = 0x10,
+  HITLOC_L_FOOT = 0x11,
+  HITLOC_GUN = 0x12,
+  HITLOC_NUM = 0x13,
+};
 
 /*
 // --- COD4: raw\maps\mp\gametypes\_hud.gsc --- //
@@ -443,6 +501,55 @@ static const char *g_he_vertalign[] =
 
 */
 
+
+enum entHandlers_s
+{
+  ENT_HANDLER_NULL = 0x0,
+  ENT_HANDLER_TRIGGER_MULTIPLE = 0x1,
+  ENT_HANDLER_TRIGGER_HURT = 0x2,
+  ENT_HANDLER_TRIGGER_HURT_TOUCH = 0x3,
+  ENT_HANDLER_TRIGGER_DAMAGE = 0x4,
+  ENT_HANDLER_SCRIPT_MOVER = 0x5,
+  ENT_HANDLER_SCRIPT_MODEL = 0x6,
+  ENT_HANDLER_GRENADE = 0x7,
+  ENT_HANDLER_TIMED_OBJECT = 0x8,
+  ENT_HANDLER_ROCKET = 0x9,
+  ENT_HANDLER_CLIENT = 0xA,
+  ENT_HANDLER_CLIENT_SPECTATOR = 0xB,
+  ENT_HANDLER_CLIENT_DEAD = 0xC,
+  ENT_HANDLER_PLAYER_CLONE = 0xD,
+  ENT_HANDLER_TURRET_INIT = 0xE,
+  ENT_HANDLER_TURRET = 0xF,
+  ENT_HANDLER_DROPPED_ITEM = 0x10,
+  ENT_HANDLER_ITEM_INIT = 0x11,
+  ENT_HANDLER_ITEM = 0x12,
+  ENT_HANDLER_TRIGGER_USE = 0x13,
+  ENT_HANDLER_PRIMARY_LIGHT = 0x14,
+  ENT_HANDLER_PLAYER_BLOCK = 0x15,
+  ENT_HANDLER_VEHICLE = 0x16,
+  ENT_HANDLER_HELICOPTER = 0x17,
+  ENT_HANDLER_COUNT = 0x18
+};
+
+
+struct entityHandler_t
+{
+  void (__cdecl *think)(struct gentity_s *);
+  void (__cdecl *reached)(struct gentity_s *);
+  void (__cdecl *blocked)(struct gentity_s *, struct gentity_s *);
+  void (__cdecl *touch)(struct gentity_s *, struct gentity_s *, int);
+  void (__cdecl *use)(struct gentity_s *, struct gentity_s *, struct gentity_s *);
+  void (__cdecl *pain)(struct gentity_s *, struct gentity_s *, int, const float *, const int, const float *, enum hitLocation_t, const int);
+  void (__cdecl *die)(struct gentity_s *, struct gentity_s *, struct gentity_s *, int, int, const int, const float *, enum hitLocation_t, int);
+  void (__cdecl *controller)(struct gentity_s *, int *);
+  int methodOfDeath;
+  int splashMethodOfDeath;
+};
+
+extern const struct entityHandler_t entityHandlers[ENT_HANDLER_COUNT];
+
+
+
 extern cvar_t *g_allowConsoleSay;
 extern cvar_t *g_disabledefcmdprefix;
 extern cvar_t *g_votedMapName;
@@ -454,29 +561,128 @@ extern cvar_t *g_gravity;
 extern cvar_t *jump_height;
 extern cvar_t *jump_stepSize;
 extern cvar_t *jump_slowdownEnable;
+extern cvar_t *g_antilag;
+extern cvar_t *g_cheats;
+extern cvar_t *g_oldVoting;
+extern cvar_t *g_inactivity;
+extern cvar_t *g_synchronousClients;
+extern cvar_t *g_log;
+extern cvar_t *g_logSync;
+extern cvar_t *g_logTimeStampInSeconds;
+extern cvar_t *g_smoothClients;
 
 extern qboolean onExitLevelExecuted;
 
+#ifdef __cplusplus
+extern "C"{
+#endif
+
+qboolean __cdecl G_SpawnString(SpawnVar *spawnVar, const char *key, const char *defaultString, const char **out);
+const char *__cdecl G_GetEntityParsePoint();
+void __cdecl G_SetEntityParsePoint(const char *beginParsePoint);
+qboolean __cdecl G_ParseSpawnVars(SpawnVar *spawnVar);
+
 int BG_GetPerkIndexForName(const char *name);
-int G_GetSavePersist(void);
 void G_SetSavePersist(int val);
 
 int G_GetClientSize();
-gclient_t *G_GetPlayerState(int num);
+playerState_t *G_GetPlayerState(int num);
 clientState_t *G_GetClientState(int num);
+gclient_t *G_GetGClient(int num);
 void SpawnVehicle(gentity_t *ent, const char *vehtype);
 void __cdecl G_VehSpawner(gentity_t *ent);
 void __cdecl G_VehCollmapSpawner(gentity_t *ent);
 void __cdecl G_SetModel(gentity_t *ent, const char *modelname);
 /* void ClientSetUsername(int clientNum, const char *username); */
+void __cdecl G_DObjCalcPose(gentity_t *ent, int *partBits);
+void __cdecl player_die(struct gentity_s *self, struct gentity_s *inflictor, struct gentity_s *attacker, int damage, int meansOfDeath, int iWeapon, const float *vDir, enum hitLocation_t hitLoc, int psTimeOffset);
+void SendScoreboard(struct gentity_s*);
+void __cdecl G_PrintEntities();
+void __cdecl TeleportPlayer(struct gentity_s *player, float *origin, float *angles);
+void __cdecl Cmd_Give_f(struct gentity_s *ent);
+void __cdecl Cmd_Take_f(struct gentity_s *ent);
+const char *__cdecl G_GetEntityTypeName(gentity_t *ent);
+int __cdecl G_ClientCanSpectateTeam(gclient_t *client, team_t team);
+int __cdecl G_ClientCanSpectateTeamOrLocalPlayer(gclient_t *client, clientState_t *cs);
+void __cdecl G_GetPlayerViewOrigin(playerState_t *ps, float *origin);
+void __cdecl BG_GetPlayerViewDirection(playerState_t *ps, float *forward, float *right, float *up);
+void __cdecl G_SetOrigin(gentity_t *ent, const float *origin);
+void __cdecl SetClientViewAngle(gentity_t *ent, const float *angle);
+qboolean GetFollowPlayerState(int clientNum, playerState_t *ps);
+void CalculateRanks();
+int __cdecl GScr_GetStatusIconIndex(const char *pszIcon);
+int __cdecl GScr_GetHeadIconIndex(const char *pszIcon);
+unsigned int __cdecl G_ModelName(int index);
+void __cdecl Com_SetWeaponInfoMemory(int source);
+void __cdecl ClearRegisteredItems();
+void __cdecl BG_ClearWeaponDef();
+int __cdecl G_GetWeaponIndexForName(const char *name);
+void __cdecl G_EntUnlink(struct gentity_s *ent);
+void __cdecl G_SetClientContents(struct gentity_s *pEnt);
+void __cdecl ClientEndFrame(struct gentity_s *ent);
+void __cdecl ClientThink_real(struct gentity_s *ent, struct usercmd_s *ucmd);
+void __cdecl BG_PlayerStateToEntityState(struct playerState_s *ps, struct entityState_s *s, int snap, char handler);
+int G_GetClientArchiveTime(int clientindex);
+void G_SetClientArchiveTime(int clindex, int time);
+void G_ClientStopUsingTurret(gentity_t* ent);
+void G_EarlyInit();
+void Scr_Vehicle_Think(struct gentity_s* ent);
+uint16_t __cdecl G_GetHitLocationString(enum hitLocation_t hitLoc);
+void __cdecl G_FreeEntity(struct gentity_s *gEnt);
+void __cdecl G_RunMissile(gentity_t *gEnt);
+void __cdecl G_GeneralLink(struct gentity_s *gEnt);
+void __cdecl G_RunItem(gentity_t *gEnt);
+void __cdecl G_RunMover(struct gentity_s *gEnt);
+void __cdecl G_RunClient(gentity_t *gEnt);
+void __cdecl G_RunCorpse(gentity_t *gEnt);
+void __cdecl Scr_FreeEntity(struct gentity_s *ent);
+void __cdecl PlayerCorpse_Free(struct gentity_s *ent);
+void __cdecl G_VehFreeEntity(struct gentity_s *ent);
+void __cdecl G_FreeTurret(struct gentity_s *ent);
+void __cdecl G_FreeEntityRefs(struct gentity_s *ent);
+void __cdecl XAnimClearTree(struct XAnimTree_s *tree);
+void __cdecl G_LocationalTrace(trace_t *results, const float *start, const float *end, int passEntityNum, int contentmask, char *priorityMap);
+
+
+void __cdecl Touch_Multi(struct gentity_s *, struct gentity_s *, int);
+void __cdecl hurt_use(struct gentity_s *, struct gentity_s *, struct gentity_s *);
+void __cdecl hurt_touch(struct gentity_s *, struct gentity_s *, int);
+void __cdecl Use_trigger_damage(struct gentity_s *, struct gentity_s *, struct gentity_s *);
+void __cdecl Reached_ScriptMover(struct gentity_s *);
+void __cdecl Pain_trigger_damage(struct gentity_s *, struct gentity_s *, int, const float *, const int, const float *, enum hitLocation_t, const int);
+void __cdecl Die_trigger_damage(struct gentity_s *, struct gentity_s *, struct gentity_s *, int, int, const int, const float *, enum hitLocation_t, int);
+void __cdecl Touch_Item_Auto(struct gentity_s *, struct gentity_s *, int);
+void __cdecl G_TimedObjectThink(struct gentity_s *);
+void __cdecl G_PlayerController(struct gentity_s *, int *);
+void __cdecl turret_use(struct gentity_s *, struct gentity_s *, struct gentity_s *);
+void __cdecl turret_controller(struct gentity_s *, int *);
+void __cdecl turret_think(struct gentity_s *);
+void __cdecl G_VehEntHandler_Think(struct gentity_s *);
+void __cdecl G_VehEntHandler_Touch(struct gentity_s *, struct gentity_s *, int);
+void __cdecl G_VehEntHandler_Use(struct gentity_s *, struct gentity_s *, struct gentity_s *);
+void __cdecl G_VehEntHandler_Pain(struct gentity_s *, struct gentity_s *, int, const float *, const int, const float *, enum hitLocation_t, const int);
+void __cdecl G_VehEntHandler_Die(struct gentity_s *, struct gentity_s *, struct gentity_s *, int, int, const int, const float *, enum hitLocation_t, int);
+void __cdecl G_VehEntHandler_Controller(struct gentity_s *, int *);
+void __cdecl Helicopter_Think(struct gentity_s *);
+void __cdecl Helicopter_Pain(struct gentity_s *, struct gentity_s *, int, const float *, const int, const float *, enum hitLocation_t, const int);
+void __cdecl Helicopter_Die(struct gentity_s *, struct gentity_s *, struct gentity_s *, int, int, const int, const float *, enum hitLocation_t, int);
+void __cdecl Helicopter_Controller(struct gentity_s *, int *);
+void __cdecl G_ExplodeMissile(struct gentity_s *);
+void __cdecl BodyEnd(struct gentity_s *);
+void __cdecl turret_think_init(struct gentity_s *);
+void __cdecl DroppedItemClearOwner(struct gentity_s *);
+void __cdecl FinishSpawningItem(struct gentity_s *);
+void __cdecl use_trigger_use(struct gentity_s *, struct gentity_s *, struct gentity_s *);
+
+
+#ifdef __cplusplus
+}
+#endif
 
 //This defines Cvars directly related to executable file
-#ifndef getcvaradr
-#define getcvaradr(adr) ((cvar_t *)(*(int *)(adr)))
-#endif
 
-#ifndef g_maxclients
-#define g_maxclients getcvaradr(0x84bcfe8)
-#endif
-
+extern cvar_t* g_maxclients;
+extern cvar_t* g_debugBullets;
+extern vec3_t playerMins, playerMaxs;
+extern uint16_t *modNames[16];
 #endif /*G_SHARED_H*/

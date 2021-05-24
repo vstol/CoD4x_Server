@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+#if 0
+
 typedef enum
 {
     VSVAR_BAD,
@@ -853,7 +855,7 @@ void HStorage_WriteDataToFile(varStorage_t* vobj, const char* filename){
 
     file = FS_SV_FOpenFileWrite(va("%s.tmp", filename));
     if(!file){
-        Com_PrintError("HStorage_WriteDataToFile: Can not open %s for writing\n", filename);
+        Com_PrintError(CON_CHANNEL_SCRIPT,"HStorage_WriteDataToFile: Can not open %s for writing\n", filename);
         return;
     }
 
@@ -869,9 +871,9 @@ void HStorage_WriteDataToFile(varStorage_t* vobj, const char* filename){
             }
 
             *infostring = 0;
-            BigInfo_SetValueForKey(infostring, "name", name);
-            BigInfo_SetValueForKey(infostring, "type", HStorage_EnumToVarType(type));
-            BigInfo_SetValueForKey(infostring, "count", va("%d", count));
+            Info_SetValueForKey(infostring, "name", name);
+            Info_SetValueForKey(infostring, "type", HStorage_EnumToVarType(type));
+            Info_SetValueForKey(infostring, "count", va("%d", count));
 
             for(i = 0; i < count; i++)
             {
@@ -883,18 +885,19 @@ void HStorage_WriteDataToFile(varStorage_t* vobj, const char* filename){
                 if(type == VSVAR_STRING)
                 {
                     string = HStorage_ValueToString(type, &value, buf, sizeof(buf));
-                    BigInfo_SetEncodedValueForKey(infostring, va("v%d", i), string, strlen(string));
+                    Info_SetEncodedValueForKey(infostring, va("v%d", i), string, strlen(string));
                 }else{
-                    BigInfo_SetValueForKey(infostring, va("v%d", i), HStorage_ValueToString(type, &value, buf, sizeof(buf)));
+                    Info_SetValueForKey(infostring, va("v%d", i), HStorage_ValueToString(type, &value, buf, sizeof(buf)));
                 }
             }
 
-            Q_strcat(infostring, sizeof(infostring), "\\\n");
+            Q_strncat(infostring, sizeof(infostring), "\\\n");
             FS_Write(infostring, strlen(infostring), file);
     }
     FS_FCloseFile(file);
     FS_SV_HomeCopyFile(va("%s.tmp", filename) , (char*)filename);
 }
+
 
 qboolean HStorage_ParseLine(varStorage_t* vobj ,char* line, int linenumber){
 
@@ -932,7 +935,7 @@ qboolean HStorage_ParseLine(varStorage_t* vobj ,char* line, int linenumber){
 
     if(HStorage_BeginDataInternal(obj, varType, varname) != qtrue)
     {
-        Com_PrintError("HStorage_ParseLine: %s\n", HStorage_GetLastErrorInternal( obj ));
+        Com_PrintError(CON_CHANNEL_SCRIPT,"HStorage_ParseLine: %s\n", HStorage_GetLastErrorInternal( obj ));
         return qfalse;
     }
 
@@ -941,7 +944,7 @@ qboolean HStorage_ParseLine(varStorage_t* vobj ,char* line, int linenumber){
         Com_sprintf(queryString, sizeof(queryString), "v%d", i);
         if(varType == VSVAR_STRING)
         {
-            outlen = BigInfo_DecodedValueForKey(line, queryString, outbuf, sizeof(outbuf));
+            outlen = Info_DecodedValueForKey(line, queryString, outbuf, sizeof(outbuf));
             if(outlen < sizeof(outbuf))
             {
                 outbuf[outlen] = '\0';
@@ -951,7 +954,7 @@ qboolean HStorage_ParseLine(varStorage_t* vobj ,char* line, int linenumber){
 
             vsValue_t value;
             value.string = outbuf;
-            suc = HStorage_AddDataInternal( obj, &value);
+            HStorage_AddDataInternal( obj, &value);
 
         }else{
             varValue = Info_ValueForKey(line, queryString);
@@ -959,7 +962,7 @@ qboolean HStorage_ParseLine(varStorage_t* vobj ,char* line, int linenumber){
         suc = HStorage_AddDataFromStringInternal( obj, varValue );
         if(suc != qtrue)
         {
-            Com_PrintError("HStorage_ParseLine: %s\n", HStorage_GetLastErrorInternal( obj ));
+            Com_PrintError(CON_CHANNEL_SCRIPT,"HStorage_ParseLine: %s\n", HStorage_GetLastErrorInternal( obj ));
             return qfalse;
         }
     }
@@ -967,14 +970,14 @@ qboolean HStorage_ParseLine(varStorage_t* vobj ,char* line, int linenumber){
     switch(HStorage_EndDataInternal( obj ))
     {
         default:
-            Com_PrintError("HStorage_ParseLine: %s\n", HStorage_GetLastErrorInternal( obj ));
+            Com_PrintError(CON_CHANNEL_SCRIPT,"HStorage_ParseLine: %s\n", HStorage_GetLastErrorInternal( obj ));
             return qfalse;
 
         case 0:
             newobj = HStorage_Relocate( obj );
             if(newobj == NULL)
             {
-                Com_PrintError("HStorage_ParseLine: %s\n", HStorage_GetLastErrorInternal( newobj ));
+                Com_PrintError(CON_CHANNEL_SCRIPT,"HStorage_ParseLine: %s\n", HStorage_GetLastErrorInternal( newobj ));
                 return qfalse;
             }
             obj = newobj;
@@ -1016,7 +1019,7 @@ qboolean HStorage_LoadDataFromFile(varStorage_t* vobj, const char* filename)
     FS_SV_FOpenFileRead(filename, &file);
 
     if(!file){
-        Com_DPrintf("HStorage_LoadDataFromFile: Can not open %s for reading\n", filename);
+        Com_DPrintf(CON_CHANNEL_SCRIPT,"HStorage_LoadDataFromFile: Can not open %s for reading\n", filename);
         return qfalse;
     }
 
@@ -1025,13 +1028,13 @@ qboolean HStorage_LoadDataFromFile(varStorage_t* vobj, const char* filename)
         read = FS_ReadLine(buf, sizeof(buf), file);
         if(read == 0)
         {
-            Com_Printf("%i lines parsed from %s, %i errors occured\n",i , filename, error);
+            Com_Printf(CON_CHANNEL_SCRIPT,"%i lines parsed from %s, %i errors occured\n",i , filename, error);
             FS_FCloseFile(file);
             return qtrue;
         }
         if(read == -1)
         {
-            Com_Printf("Can not read from %s\n", filename);
+            Com_Printf(CON_CHANNEL_SCRIPT,"Can not read from %s\n", filename);
             FS_FCloseFile(file);
             return qfalse;
         }
@@ -1042,7 +1045,7 @@ qboolean HStorage_LoadDataFromFile(varStorage_t* vobj, const char* filename)
         if(!HStorage_ParseLine(vobj, buf, i+1)) error++; //Executes the function given as argument in execute
     }
 
-    Com_PrintWarning("More than 32 errors occured by reading from %s\n", filename);
+    Com_PrintWarning(CON_CHANNEL_SCRIPT,"More than 32 errors occured by reading from %s\n", filename);
 
     FS_FCloseFile(file);
     return qfalse;
@@ -1132,3 +1135,4 @@ const char* HStorage_GetLastError(varStorage_t* obj)
 {
     return HStorage_GetLastErrorInternal( obj->memObj );
 }
+#endif

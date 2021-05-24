@@ -26,6 +26,7 @@ If you have questions concerning this license or the applicable additional terms
 ===========================================================================
 */
 
+#include "../q_shared.h"
 
 /*****************************************************************************
  * name:		l_precomp.h
@@ -68,6 +69,20 @@ If you have questions concerning this license or the applicable additional terms
 #define INDENT_ELIF             0x0004
 #define INDENT_IFDEF            0x0008
 #define INDENT_IFNDEF           0x0010
+
+#if 0
+#define MAX_TOKENLENGTH     1024
+
+typedef struct pc_token_s
+{
+	int type;
+	int subtype;
+	int intvalue;
+	float floatvalue;
+	char string[MAX_TOKENLENGTH];
+} pc_token_t;
+
+#endif
 
 //macro definitions
 typedef struct define_s

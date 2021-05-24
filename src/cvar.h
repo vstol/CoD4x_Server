@@ -24,7 +24,7 @@
 #ifndef __CVAR_H__
 #define __CVAR_H__
 
-#include "q_math.h"
+#include "q_shared.h"
 #include "q_shared.h"
 
 // nothing outside the Cvar_*() functions should modify these fields!
@@ -42,16 +42,35 @@ typedef enum{
 }cvarType_t;
 
 
-typedef	union value_s{
-		float floatval;
-		float value;
+typedef struct{
 		int integer;
-		char* string;
-		byte boolean;
-		vec3_t vec3;
-		vec4_t vec4;
-	}value_t;
+		const char** strings;
+}EnumValueStr_t;
 
+typedef union{
+		float floatval;
+		int integer;
+		const char* string;
+		byte boolean;
+		vec4_t vec4;
+		vec3_t vec3;
+		vec2_t vec2;
+		ucolor_t color;
+		EnumValueStr_t enumval; /* For Cvar_Register and Cvar_ValidateNewVar only */
+}CvarValue;
+
+
+typedef struct{
+	union{
+		int imin;
+		float fmin;
+	};
+	union{
+		int imax;
+		float fmax;
+		const char** enumStr; //Not everywhere valid!
+	};
+}CvarLimits;
 
 
 typedef struct cvar_s {
@@ -70,6 +89,7 @@ typedef struct cvar_s {
 		vec3_t vec3;
 		vec4_t vec4;
 		ucolor_t color;
+		CvarValue current;
 	};
 	union{
 		float latchedFloatval;
@@ -80,6 +100,7 @@ typedef struct cvar_s {
 		vec3_t latchedVec3;
 		vec4_t latchedVec4;
 		ucolor_t latchedColor;
+		CvarValue latched;
 	};
 	union{
 		float resetFloatval;
@@ -90,16 +111,10 @@ typedef struct cvar_s {
 		vec3_t resetVec3;
 		vec4_t resetVec4;
 		ucolor_t resetColor;
+		CvarValue reset;
 	};
-	union{
-		int imin;
-		float fmin;
-	};
-	union{
-		int imax;
-		float fmax;
-		const char** enumStr;
-	};
+	CvarLimits limits;
+	
 	struct cvar_s *next;
 	struct cvar_s *hashNext;
 } cvar_t;
@@ -107,7 +122,10 @@ typedef struct cvar_s {
 
 extern int cvar_modifiedFlags;
 
-
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 //Defines Cvarrelated functions inside executable file
 cvar_t* Cvar_RegisterString(const char *var_name, const char *var_value, unsigned short flags, const char *var_description);
 cvar_t* Cvar_RegisterBool(const char *var_name, qboolean var_value, unsigned short flags, const char *var_description);
@@ -150,6 +168,7 @@ char* Cvar_InfoString_IW_Wrapper(int dummy, int bit);
 char* Cvar_InfoString_Big(int bit, char*, int);
 void Cvar_ForEach(void (*callback)(cvar_t const*, void* passedhere), void* passback);
 char* Cvar_DisplayableValue(cvar_t const*);
+char* Cvar_DisplayableValueMT( cvar_t const *var, char* value, int maxlen);
 char* Cvar_GetVariantString(const char* name);
 cvar_t* Cvar_FindMalleableVar(const char* name);
 void Cvar_Init(void);
@@ -158,6 +177,7 @@ float Cvar_VariableValue( const char *var_name );
 int Cvar_VariableIntegerValue( const char *var_name );
 qboolean Cvar_VariableBooleanValue( const char *var_name );
 void Cvar_Set( const char *var_name, const char *value);
+void Cvar_Set2( const char *var_name, const char *value, qboolean force);
 void Cvar_SetAllowCheatOnly( const char *var_name, const char *value);
 void Cvar_Reset( const char *var_name );
 void Cvar_SetCheatState( void );
@@ -177,6 +197,10 @@ void Cvar_SetLatched(const char* name, const char* value);
 void Cvar_ClearFlagsForEach(unsigned short flags);
 void Cvar_ClearModified(cvar_t* cvar);
 qboolean Cvar_IsDefined(const char* varname);
+#ifdef __cplusplus
+}
+#endif
+
 #define Cvar_GetInt Cvar_VariableIntegerValue
 #define Cvar_GetFloat Cvar_VariableValue
 #define Cvar_GetBool Cvar_VariableBooleanValue
@@ -211,7 +235,9 @@ cvar_t* __regparm1 Cvar_FindMalleableVar(const char* name);
 void Cvar_Init(void);
 */
 
+
 //defines Cvarflags
+#define CVAR_TEMP		0
 #define	CVAR_ARCHIVE		1	// set to cause it to be saved to vars.rc
 								// used for system variables, not for player
 								// specific configurations
@@ -227,7 +253,7 @@ void Cvar_Init(void);
 								// changed yet
 #define	CVAR_ROM		64	// display only, cannot be set by user at all
 #define CVAR_CHEAT		128	// can not be changed if cheats are disabled
-#define	CVAR_TEMP		256	// can be set even when cheats are disabled, but is not archived
+#define	CVAR_CONFIG		256	// setting this will create a configstring which sets the client cvar too
 #define CVAR_NORESTART		1024	// do not clear when a cvar_restart is issued
 #define	CVAR_USER_CREATED	16384	// created by a set command
 

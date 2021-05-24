@@ -29,14 +29,16 @@
 #include "cvar.h"
 #include "qcommon_io.h"
 
-#define DEDICATEDONLY
-
 typedef enum {
 	// bk001129 - make sure SE_NONE is zero
 	SE_NONE = 0,    // evTime is still valid
 	SE_CONSOLE, // evPtr is a char*
 	SE_PACKET   // evPtr is a netadr_t followed by data bytes to evPtrLength
 } sysEventType_t;
+
+#ifdef __cplusplus
+extern "C"{
+#endif
 
 void Com_QueueEvent( int time, sysEventType_t type, int value, int value2, int ptrLength, void *ptr );
 
@@ -68,21 +70,23 @@ int CCS_GetConstConfigStringIndex(const char *string);
 
 extern unsigned long long com_frameTime;
 extern unsigned long long com_uFrameTime;
-extern int gamebinary_initialized;
 extern cvar_t* com_dedicated;
 extern cvar_t* com_timescale;
 extern cvar_t* com_sv_running;
 extern cvar_t* com_logfile;
 extern cvar_t* com_developer;
-extern cvar_t* com_useFastfiles;
+extern cvar_t* useFastFile;
 extern cvar_t* com_animCheck;
 extern cvar_t* com_version;
+extern cvar_t* com_logrcon; //Output response to rcon commands to internal console
 extern qboolean com_securemode;
-
+extern unsigned int com_expectedHunkUsage;
+extern qboolean com_fixedConsolePosition;
 int Com_IsDeveloper();
 qboolean Com_LoadBinaryImage();
-
+void __cdecl Com_ErrorAbort();
 void Com_SyncThreads();
+void R_ReleaseDXDeviceOwnership();
 
 #define MAXPRINTMSG 4096
 #define	MAX_RELIABLE_COMMANDS	128	// max string commands buffered for restransmit
@@ -130,6 +134,12 @@ void Com_UnloadBsp();
 int Com_LoadSoundAliases(const char *a1, const char *a2, signed int a3);
 
 void Com_GetBspFilename(char *bspfilename, size_t len, const char *levelname);
+void __cdecl Com_SafeServerDObjFree(int handle);
+const char *__cdecl Com_DisplayName(const char *name, const char *clanAbbrev, int type);
+
+#ifdef __cplusplus
+}
+#endif
 
 
 #endif

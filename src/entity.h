@@ -1,3 +1,4 @@
+
 /*
 ===========================================================================
     Copyright (C) 2010-2013  Ninja and TheKelm
@@ -24,15 +25,12 @@
 #ifndef __ENTITY_H__
 #define __ENTITY_H__
 
-#include "q_math.h"
+#include "g_public_mp.h"
 #include "q_shared.h"
+#include "game/surfaceflags.h"
 
-#define g_entities ((gentity_t*)(0x841ffe0))
 
-#ifndef CLIPHANDLE_DEFINED
-#define CLIPHANDLE_DEFINED
-typedef int clipHandle_t;
-#endif
+
 
 typedef enum {
 	TR_STATIONARY,
@@ -52,56 +50,145 @@ typedef struct {
 } trajectory_t;
 
 
-typedef struct{
-	int	cullDist;
-	int	period;
-}lerp_loopFx_t;
+struct LerpEntityStatePhysicsJitter
+{
+  float innerRadius;
+  float minDisplacement;
+  float maxDisplacement;
+};
 
 
-typedef struct{
-	int	bodyPitch;
-	int	bodyRoll;
-	int	steerYaw;
-	int	materialTime;
-	int	gunPitch;
-	int	gunYaw;
-	int	teamAndOwnerIndex;
-}lerp_vehicle_t;
+struct LerpEntityStatePlayer
+{
+  float leanf;
+  int movementDir;
+};
+
+struct LerpEntityStateLoopFx
+{
+  float cullDist;
+  int period;
+};
+
+struct LerpEntityStateCustomExplode
+{
+  int startTime;
+};
+
+struct LerpEntityStateTurret
+{
+  vec3_t gunAngles;
+};
+
+struct LerpEntityStateAnonymous
+{
+  int data[7];
+};
+
+struct LerpEntityStateExplosion
+{
+  float innerRadius;
+  float magnitude;
+};
+
+struct LerpEntityStateBulletHit
+{
+  vec3_t start;
+};
+
+struct LerpEntityStatePrimaryLight
+{
+  byte colorAndExp[4];
+  float intensity;
+  float radius;
+  float cosHalfFovOuter;
+  float cosHalfFovInner;
+};
+
+struct LerpEntityStateMissile
+{
+  int launchTime;
+};
+
+struct LerpEntityStateSoundBlend
+{
+  float lerp;
+};
+
+struct LerpEntityStateExplosionJolt
+{
+  float innerRadius;
+  vec3_t impulse;
+};
+
+struct LerpEntityStateVehicle
+{
+  float bodyPitch;
+  float bodyRoll;
+  float steerYaw;
+  int materialTime;
+  float gunPitch;
+  float gunYaw;
+  int team;
+};
+
+struct LerpEntityStateEarthquake
+{
+  float scale;
+  float radius;
+  int duration;
+};
+
+union LerpEntityStateTypeUnion
+{
+  struct LerpEntityStateTurret turret;
+  struct LerpEntityStateLoopFx loopFx;
+  struct LerpEntityStatePrimaryLight primaryLight;
+  struct LerpEntityStatePlayer player;
+  struct LerpEntityStateVehicle vehicle;
+  struct LerpEntityStateMissile missile;
+  struct LerpEntityStateSoundBlend soundBlend;
+  struct LerpEntityStateBulletHit bulletHit;
+  struct LerpEntityStateEarthquake earthquake;
+  struct LerpEntityStateCustomExplode customExplode;
+  struct LerpEntityStateExplosion explosion;
+  struct LerpEntityStateExplosionJolt explosionJolt;
+  struct LerpEntityStatePhysicsJitter physicsJitter;
+  struct LerpEntityStateAnonymous anonymous;
+};
 
 
-typedef struct{
-	int	lerp;
-}lerp_soundBlend_t;
 
+struct LerpEntityState
+{
+  int eFlags;
+  trajectory_t pos;
+  trajectory_t apos;
+  union LerpEntityStateTypeUnion u;
+};
 
-typedef struct{
-	int	launchTime;
-}lerp_missile_t;
-
-
-typedef struct{
-	int	leanf;
-	int	movementDir;
-}lerp_player_t;
-
-
-typedef struct{
-	int	data[6];
-}lerp_anonymous_t;
-
-typedef struct {
-	int		eFlags;
-	trajectory_t	pos;	// for calculating position	0x0c
-	trajectory_t	apos;	// for calculating angles	0x30
-	union{
-		lerp_anonymous_t	anonymous;
-		lerp_player_t		player;
-		lerp_missile_t		missile;
-		lerp_soundBlend_t	soundBlend;
-		lerp_loopFx_t		loopFx;
-		lerp_vehicle_t		vehicle;
-	}u;
-}lerp_t;
+enum entityType_t
+{
+  ET_GENERAL = 0x0,
+  ET_PLAYER = 0x1,
+  ET_PLAYER_CORPSE = 0x2,
+  ET_ITEM = 0x3,
+  ET_MISSILE = 0x4,
+  ET_INVISIBLE = 0x5,
+  ET_SCRIPTMOVER = 0x6,
+  ET_SOUND_BLEND = 0x7,
+  ET_FX = 0x8,
+  ET_LOOP_FX = 0x9,
+  ET_PRIMARY_LIGHT = 0xA,
+  ET_MG42 = 0xB,
+  ET_HELICOPTER = 0xC,
+  ET_PLANE = 0xD,
+  ET_VEHICLE = 0xE,
+  ET_VEHICLE_COLLMAP = 0xF,
+  ET_VEHICLE_CORPSE = 0x10,
+  ET_EVENTS = 0x11,
+  ET_MOVER = 0x99 //Dummy for botlib
+};
 
 // entityState_t is the information conveyed from the server
 // in an update message about entities that the client will
@@ -113,9 +200,9 @@ typedef struct {
 typedef struct entityState_s {//Confirmed names and offsets but not types
 
 	int		number;			// entity index	//0x00
-	int		eType;			// entityType_t	//0x04
+	enum entityType_t	eType;			// entityType_t	//0x04
 
-	lerp_t		lerp;
+	struct LerpEntityState	lerp;
 
 	int		time2;			//0x70
 
@@ -154,12 +241,11 @@ typedef struct entityState_s {//Confirmed names and offsets but not types
 	int		un2;			//0xd8
 	int		fTorsoPitch;		//0xdc
 	int		fWaistPitch;		//0xe0
-	vec4_t		partBits;		//0xe4
+	uint32_t	partBits[4];		//0xe4
 } entityState_t;	//sizeof(entityState_t): 0xf4
 
 
 typedef struct {
-	//entityState_t	s;				//Duplicated struct is removed
 	byte		linked;				//0xf4 qfalse if not in any good cluster
 
 	byte		bmodel;				//0xf5 if false, assume an explicit mins / maxs bounding box
@@ -167,7 +253,7 @@ typedef struct {
 	byte		svFlags;
 	byte		pad1;
 
-	int			clientMask[2];
+	int		clientMask[2];
 	byte		inuse;
 	byte		pad2[3];
 	int			broadcastTime;
@@ -191,14 +277,76 @@ typedef struct {
 	// ent->s.number == passEntityNum	(don't interact with self)
 	// ent->r.ownerNum == passEntityNum	(don't interact with your own missiles)
 	// entity[ent->r.ownerNum].r.ownerNum == passEntityNum	(don't interact with other missiles from owner)
-	uint16_t	ownerNum;	//0x154
-	uint16_t	pad3;
+  EntHandle ownerNum;
 	int		eventTime;
 } entityShared_t;
 
-/* Real types are different of course */
-typedef void turretInfo_s;
 
+struct trigger_ent_t
+{
+  int threshold;
+  int accumulate;
+  int timestamp;
+  int singleUserEntIndex;
+  byte requireLookAt;
+};
+
+struct item_ent_t
+{
+  int ammoCount;
+  int clipAmmoCount;
+  int index;
+};
+
+
+struct mover_ent_t
+{
+  float decelTime;
+  float aDecelTime;
+  float speed;
+  float aSpeed;
+  float midTime;
+  float aMidTime;
+  vec3_t pos1;
+  vec3_t pos2;
+  vec3_t pos3;
+  vec3_t apos1;
+  vec3_t apos2;
+  vec3_t apos3;
+};
+
+struct corpse_ent_t
+{
+  int deathAnimStartTime;
+};
+
+enum MissileStage
+{
+  MISSILESTAGE_SOFTLAUNCH = 0x0,
+  MISSILESTAGE_ASCENT = 0x1,
+  MISSILESTAGE_DESCENT = 0x2,
+};
+
+enum MissileFlightMode
+{
+  MISSILEFLIGHTMODE_TOP = 0x0,
+  MISSILEFLIGHTMODE_DIRECT = 0x1,
+};
+
+
+struct missile_ent_t
+{
+  float time;
+  int timeOfBirth;
+  float travelDist;
+  vec3_t surfaceNormal;
+  enum team_s team;
+  vec3_t curvature;
+  int targetEntNum;
+  vec3_t targetOffset;
+  enum MissileStage stage;
+  enum MissileFlightMode flightMode;
+};
 
 
 typedef struct gentity_s gentity_t;
@@ -213,7 +361,7 @@ struct gentity_s {
 
 	struct gclient_s    *client;            // NULL if not a client		0x15c
 
-	turretInfo_s *pTurretInfo;
+	struct turretInfo_s *pTurretInfo;
 	struct scr_vehicle_s *scr_vehicle;
 
 	uint16_t model;
@@ -235,10 +383,53 @@ struct gentity_s {
 	int flags;
 	int eventTime;
 
-    char pad_188[24]; /* 0x188 */
-    int healthPoints; /* 0x1A0 */
-	char unknown[208];
+	int freeAfterEvent;
+	int unlinkAfterEvent;
+	int clipmask;
+	int processedFrame;
+	EntHandle parent;
+	int nextthink;
+
+  int health; /* 0x1A0 */
+	int maxHealth;
+	int damage;
+	int count;
+
+	struct gentity_s *chain;
+
+	//	char unknown[104];
+	union{
+		struct item_ent_t item[2];
+		struct trigger_ent_t trigger;
+		struct mover_ent_t mover;
+		struct corpse_ent_t corpse;
+		struct missile_ent_t missile;
+	};
+
+	EntHandle missileTargetEnt;
+
+	struct tagInfo_s* tagInfo;
+	struct gentity_s *tagChildren;
+	uint16_t attachModelNames[19];
+	uint16_t attachTagNames[19];
+	int useCount;
+	struct gentity_s *nextFree;
 }; /* Size: 0x274 */
+
+extern gentity_t g_entities[];
+
+
+struct tagInfo_s
+{
+  struct gentity_s *parent;
+  struct gentity_s *next;
+  uint16_t name;
+  uint16_t pad;
+  int index;
+  float axis[4][3];
+  float parentInvAxis[4][3];
+};
+
 
 /***************** Verified *******************************/
 
@@ -257,41 +448,6 @@ struct gentity_s {
 #define ENTITYNUM_MAX_NORMAL    ( MAX_GENTITIES - 2 )
 
 #define	MAX_ENT_CLUSTERS	16
-
-
-
-
-
-// contents flags are seperate bits
-// a given brush can contribute multiple content bits
-// multiple brushes can be in a single leaf
-
-// these definitions also need to be in q_shared.h!
-
-// lower bits are stronger, and will eat weaker brushes completely
-#define CONTENTS_SOLID          1       // an eye is never valid in a solid
-
-
-#define CONTENTS_PLAYERCLIP     0x10000
-#define CONTENTS_MONSTERCLIP    0x20000
-#define CONTENTS_VEHICLECLIP	//??
-#define CONTENTS_ITEMCLIP
-#define CONTENTS_NODROP
-#define CONTENTS_NONSOLID
-
-
-
-#define CONTENTS_BODY           0x2000000   // should never be on a brush, only in game
-#define PLAYER_SOLIDMASK	0x00600000
-
-/* Probably not. Just here so botlib compiles */
-#define CONTENTS_LAVA           8
-#define CONTENTS_SLIME          16
-#define CONTENTS_WATER          32
-#define CONTENTS_FOG            64
-#define SURF_SKY                0x4     // lighting from environment map
-
-
 
 
 gentity_t* G_Spawn();

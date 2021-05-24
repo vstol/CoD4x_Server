@@ -26,8 +26,22 @@
 #define __SYS_MAIN_H__
 
 #include "q_shared.h"
+
+
 #include <setjmp.h>
 #include <inttypes.h>
+#include <stdbool.h>
+
+#ifdef _WIN32
+#include "win32/sys_win32.h"
+#else
+#include "unix/sys_unix.h"
+#endif
+
+
+#ifdef __cplusplus
+extern "C"{
+#endif
 
 unsigned int Sys_Milliseconds( void );
 unsigned long long Sys_MillisecondsLong( void );
@@ -47,6 +61,7 @@ __cdecl void QDECL Sys_Error( const char *fmt, ... );
 void Sys_SetBinaryPath(const char *path);
 const char *Sys_BinaryPath(void);
 const char *Sys_ExeFile(void);
+const char *Sys_ExeFileShort(void);
 void Sys_SetDefaultInstallPath(const char *path);
 char *Sys_DefaultInstallPath(void);
 const char *Sys_DefaultAppPath(void);
@@ -56,9 +71,6 @@ void Sys_DoStartProcess( char *cmdline );
 const char *Sys_Dirname(const char *path);
 char *Sys_Cwd( void );
 void Sys_InitCrashDumps();
-qboolean Sys_MemoryProtectWrite(void* startoffset, int len);
-qboolean Sys_MemoryProtectExec(void* startoffset, int len);
-qboolean Sys_MemoryProtectReadonly(void* startoffset, int len);
 const char *Sys_DefaultHomePath(void);
 const char *Sys_TempPath( void );
 void __cdecl Sys_Init(void);
@@ -70,6 +82,7 @@ const char* Sys_GetUsername();
 void Sys_SetExitCmdline(const char *);
 void Sys_DoSignalAction(int signal, const char *);
 void Sys_SetExeFile(const char *);
+void Sys_SetExeFileShort(const char *);
 int Sys_Main(char* commandLine);
 const char* Sys_GetCommandline( void );
 void Sys_ReplaceProcess( char *cmdline );
@@ -79,11 +92,10 @@ const char *Sys_Basename( char *path );
 qboolean Sys_Mkdir( const char *path );
 qboolean Sys_SetPermissionsExec(const char* ospath);
 void Sys_WaitForErrorConfirmation(const char* error);
-void  __attribute__ ((noreturn)) Sys_ExitForOS( int exitCode );
+void  __noreturn Sys_ExitForOS( int exitCode );
 
 
 void Sys_SleepSec(int seconds);
-int Sys_Backtrace(void** buffer, int size);
 void Sys_EventLoop(void);
 uint32_t Sys_MillisecondsRaw();
 void Sys_LoadLibraryError(char* errormessage, int maxlen);
@@ -96,12 +108,25 @@ void CON_Shutdown( void );
 void CON_Init(void);
 char *CON_Input( void );
 void CON_Print( const char *msg );
+void CON_DisableDraw();
+void CON_EnableDraw();
 int Sys_Chmod(const char* filename, int mode);
 void Sys_Restart(const char* reason);
 
 void Sys_BeginLoadThreadPriorities();
 void Sys_EndLoadThreadPriorities();
 void Sys_BeginShutdownWatchdog();
+
+signed int __cdecl Sys_ResetEvent(HANDLE handle);
+signed int __cdecl Sys_SetEvent(HANDLE handle);
+HANDLE Sys_CreateEvent(qboolean bManualReset, qboolean bInitialState, const char *name);
+void Sys_PrintBacktrace();
+void Sys_SleepMSec(int msec);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif
 
 

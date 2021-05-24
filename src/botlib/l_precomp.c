@@ -58,7 +58,7 @@ typedef enum {qfalse, qtrue}    qboolean;
 #endif //SCREWUP
 
 #ifdef BOTLIB
-#include "../q_shared.h"
+#include "game_inc.h"
 #include "../game/botlib.h"
 #include "be_interface.h"
 #include "l_memory.h"
@@ -91,16 +91,6 @@ typedef enum {qfalse, qtrue}    qboolean;
 #define qfalse  false
 #define Q_stricmp   stricmp
 
-#define MAX_TOKENLENGTH     1024
-
-typedef struct pc_token_s
-{
-	int type;
-	int subtype;
-	int intvalue;
-	float floatvalue;
-	char string[MAX_TOKENLENGTH];
-} pc_token_t;
 #endif //BSPC
 
 #if defined( QUAKE ) && !defined( BSPC )
@@ -697,7 +687,7 @@ void PC_AddBuiltinDefines( source_t *source ) {
 int PC_ExpandBuiltinDefine( source_t *source, token_t *deftoken, define_t *define,
 							token_t **firsttoken, token_t **lasttoken ) {
 	token_t *token;
-	unsigned long t;    //	time_t t; //to prevent LCC warning
+	long t;    //	time_t t; //to prevent LCC warning
 	char *curtime;
 
 	token = PC_CopyToken( deftoken );
@@ -733,7 +723,6 @@ int PC_ExpandBuiltinDefine( source_t *source, token_t *deftoken, define_t *defin
 		strncat( token->string, curtime + 4, 7 );
 		strncat( token->string + 7, curtime + 20, 4 );
 		strcat( token->string, "\"" );
-		free( curtime );
 		token->type = TT_NAME;
 		token->subtype = strlen( token->string );
 		*firsttoken = token;
@@ -747,7 +736,6 @@ int PC_ExpandBuiltinDefine( source_t *source, token_t *deftoken, define_t *defin
 		strcpy( token->string, "\"" );
 		strncat( token->string, curtime + 11, 8 );
 		strcat( token->string, "\"" );
-		free( curtime );
 		token->type = TT_NAME;
 		token->subtype = strlen( token->string );
 		*firsttoken = token;
@@ -1659,7 +1647,7 @@ int PC_EvaluateTokens( source_t *source, token_t *tokens, signed long int *intva
 	int questmarkintvalue = 0;
 	double questmarkfloatvalue = 0;
 	int gotquestmarkvalue = qfalse;
-	int lastoperatortype = 0;
+//	int lastoperatortype = 0;
 	//
 	operator_t operator_heap[MAX_OPERATORS];
 	int numoperators = 0;
@@ -2047,7 +2035,7 @@ int PC_EvaluateTokens( source_t *source, token_t *tokens, signed long int *intva
 		if ( error ) {
 			break;
 		}
-		lastoperatortype = o->operator;
+//		lastoperatortype = o->operator;
 		//if not an operator with arity 1
 		if ( o->operator !=P_LOGIC_NOT
 			 && o->operator !=P_BIN_NOT ) {

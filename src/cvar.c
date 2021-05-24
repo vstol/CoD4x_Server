@@ -56,42 +56,9 @@ int			cvar_numIndexes;
 #define FILE_HASH_SIZE		512
 static	cvar_t*		hashTable[FILE_HASH_SIZE];
 
-typedef struct{
-		int integer;
-		const char** strings;
-}EnumValueStr_t;
-
-typedef struct{
-	union{
-		float floatval;
-		int integer;
-		const char* string;
-		byte boolean;
-		vec4_t vec4;
-		vec3_t vec3;
-		vec2_t vec2;
-		ucolor_t color;
-		EnumValueStr_t enumval; /* For Cvar_Register and Cvar_ValidateNewVar only */
-	};
-}CvarValue;
-
-
-typedef struct{
-	union{
-		int imin;
-		float fmin;
-	};
-	union{
-		int imax;
-		float fmax;
-	};
-}CvarLimits;
-
 
 static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force );
 void Cvar_ValueToStr(cvar_t const *cvar, char* bufvalue, int sizevalue, char* bufreset, int sizereset, char* buflatch, int sizelatch);
-void Cvar_Set2( const char *var_name, const char *value, qboolean force);
-static const char	*Cvar_DisplayableValueMT( cvar_t const *var, char* value, int maxlen);
 
 /*
 ================
@@ -117,16 +84,16 @@ static long generateHashValue( const char *fname ) {
 
 void Cvar_AddFlags(cvar_t* var, unsigned short flags)
 {
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 	var->flags |= flags;
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 }
 
 void Cvar_ClearFlags(cvar_t* var, unsigned short flags)
 {
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 	var->flags &= ~flags;
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 }
 
 /*
@@ -191,9 +158,9 @@ float Cvar_VariableValueInternal( const char *var_name ) {
 }
 float Cvar_VariableValue( const char *var_name )
 {
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 	float v = Cvar_VariableValueInternal(var_name);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 	return v;
 }
 /*
@@ -217,13 +184,16 @@ int Cvar_VariableIntegerValueInternal( const char *var_name ) {
 		return atoi(var->string);
 	return 0;
 }
+
 int Cvar_VariableIntegerValue( const char *var_name )
 {
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 	int i = Cvar_VariableIntegerValueInternal(var_name);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 	return i;
 }
+
+
 /*
 ============
 Cvar_VariableBooleanValue
@@ -264,9 +234,9 @@ qboolean Cvar_VariableBooleanValueInternal( const char *var_name ) {
 }
 qboolean Cvar_VariableBooleanValue( const char *var_name )
 {
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 	qboolean b = Cvar_VariableBooleanValueInternal(var_name);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 	return b;
 }
 
@@ -294,7 +264,7 @@ Cvar_VariableStringBuffer
 */
 const char* Cvar_VariableStringBuffer( const char *var_name, char *buffer, int bufsize ) {
 	cvar_t *var;
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	var = Cvar_FindVar (var_name);
 	if (!var) {
@@ -303,7 +273,7 @@ const char* Cvar_VariableStringBuffer( const char *var_name, char *buffer, int b
 	else {
 		Cvar_DisplayableValueMT(var, buffer, bufsize );
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 	return buffer;
 }
 
@@ -344,23 +314,11 @@ void	Cvar_CommandCompletion( void(*callback)(const char *s) ) {
 }
 
 
-
-
-static qboolean Cvar_ValidateNewVar(const char* var_name, cvarType_t type, CvarValue *value, CvarLimits *limits)
+static qboolean Cvar_ClampToLimits(cvarType_t type, CvarValue *value, CvarLimits *limits)
 {
 	qboolean retval = qtrue;
-	int i;
 	static const char* enumFailDummy[2];
-
-	if ( !var_name ) {
-		Com_Error( ERR_FATAL, "Cvar_Register: NULL parameter" );
-		return qfalse;
-	}
-
-	if ( !Cvar_ValidateString( var_name ) ) {
-		Com_Error( ERR_FATAL, "Cvar_Register: invalid cvar name string: %s\n", var_name );
-		return qfalse;
-	}
+	int i;
 
 	switch(type)
 	{
@@ -460,15 +418,16 @@ static qboolean Cvar_ValidateNewVar(const char* var_name, cvarType_t type, CvarV
 		case CVAR_ENUM:
 			enumFailDummy[0] = "";
 			enumFailDummy[1] = NULL;
-			if((*value).enumval.strings == NULL)
+			if((*limits).enumStr == NULL)
 			{
-				(*value).enumval.strings = enumFailDummy;
-				(*value).enumval.integer = 0;
+				(*limits).enumStr = enumFailDummy;
+				(*value).integer = 0;
 				return qfalse;
 			}
-			for(i = 0; (*value).enumval.strings[i] != NULL && i < (*value).enumval.integer; i++ );
-			if(i != (*value).enumval.integer)
+			for(i = 0; (*limits).enumStr[i] != NULL && i < (*value).integer; i++ );
+			if(i != (*value).integer)
 			{
+				(*value).integer = 0;
 				return qfalse;
 			}
 			return qtrue;
@@ -501,6 +460,24 @@ static qboolean Cvar_ValidateNewVar(const char* var_name, cvarType_t type, CvarV
 			Com_Error( ERR_FATAL, "Cvar_Register: Invalid type" );
 			return qfalse;
 	}
+
+}
+
+
+
+static qboolean Cvar_ValidateNewVar(const char* var_name, cvarType_t type, CvarValue *value, CvarLimits *limits)
+{
+	if ( !var_name ) {
+		Com_Error( ERR_FATAL, "Cvar_Register: NULL parameter" );
+		return qfalse;
+	}
+
+	if ( !Cvar_ValidateString( var_name ) ) {
+		Com_Error( ERR_FATAL, "Cvar_Register: invalid cvar name string: %s\n", var_name );
+		return qfalse;
+	}
+	return Cvar_ClampToLimits(type, value, limits);
+
 }
 /*
 
@@ -558,7 +535,7 @@ void Cvar_Deallocate( cvar_t *var )
 
 void Cvar_FreeStrings( cvar_t *var )
 {
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	if(var->type == CVAR_STRING)
 	{
@@ -590,7 +567,7 @@ void Cvar_FreeStrings( cvar_t *var )
 			FreeString( var->description );
 		var->description = NULL;
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 }
 
 /*
@@ -612,14 +589,14 @@ static cvar_t *Cvar_Register(const char* var_name, cvarType_t type, unsigned sho
 	cvar_t* safehashNext;
 	char latchedStr[8192];
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	isvalid = Cvar_ValidateNewVar(var_name, type, &value, &limits);
 
 	if(isvalid == qfalse)
 	{
 		Com_Error( ERR_FATAL, "Cvar_Register: invalid cvar value or type for: %s\n", var_name );
-		Sys_LeaveCriticalSection(CRIT_CVAR);
+		Sys_LeaveCriticalSection(CRITSECT_CVAR);
 		return NULL;
 	}
 
@@ -637,7 +614,7 @@ static cvar_t *Cvar_Register(const char* var_name, cvarType_t type, unsigned sho
 		if(var->type != type && !(var->flags & CVAR_USER_CREATED))
 		{
 			Com_Error( ERR_FATAL, "Cvar_Register: Tried to reregister an already registered Cvar \'%s\' as a different type\n", var_name );
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return NULL;
 		}
 		/* Get the old value from string var */
@@ -669,27 +646,25 @@ static cvar_t *Cvar_Register(const char* var_name, cvarType_t type, unsigned sho
 				break;
 			case CVAR_FLOAT:
 				var->resetFloatval = value.floatval;
-				var->fmin = limits.fmin;
-				var->fmax = limits.fmax;
+				var->limits = limits;
 				break;
 			case CVAR_VEC2:
 			case CVAR_VEC3:
 			case CVAR_VEC4:
-				var->fmin = limits.fmin;
-				var->fmax = limits.fmax;
+				var->limits = limits;
+				memcpy(var->resetVec4, value.vec4, sizeof(var->resetVec4));
 				break;
 			case CVAR_COLOR:
 				var->resetColor = value.color;
 				break;
 			case CVAR_ENUM:
-				var->resetInteger = value.enumval.integer;
-				var->imin = 0;
-				var->enumStr = value.enumval.strings;
+				var->resetInteger = value.integer;
+				var->limits.imin = 0;
+				var->limits.enumStr = limits.enumStr;
 				break;
 			case CVAR_INT:
 				var->resetInteger = value.integer;
-				var->imin = limits.imin;
-				var->imax = limits.imax;
+				var->limits = limits;
 				break;
 			case CVAR_STRING:
 				var->resetString = CopyString( value.string );
@@ -712,7 +687,9 @@ static cvar_t *Cvar_Register(const char* var_name, cvarType_t type, unsigned sho
 
 		// Take the latched value now
 		Cvar_Set2( var_name, latchedStr, qtrue );
-		Sys_LeaveCriticalSection(CRIT_CVAR);
+		Cvar_ClampToLimits(var->type, &var->current, &var->limits);
+
+		Sys_LeaveCriticalSection(CRITSECT_CVAR);
 		return var;
 	}
 	if(!var)
@@ -720,7 +697,7 @@ static cvar_t *Cvar_Register(const char* var_name, cvarType_t type, unsigned sho
 		//Doing some stuff for a new var
 		if ( cvar_numIndexes >= MAX_CVARS ) {
 			Com_Error( ERR_FATAL, "MAX_CVARS" );
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return NULL;
 		}
 
@@ -729,7 +706,6 @@ static cvar_t *Cvar_Register(const char* var_name, cvarType_t type, unsigned sho
 
 		Com_Memset(var, 0, sizeof(cvar_t));
 		var->name = CopyString (var_name);
-
 		// link the variable in
 		var->next = cvar_vars;
 		cvar_vars = var;
@@ -769,14 +745,12 @@ static cvar_t *Cvar_Register(const char* var_name, cvarType_t type, unsigned sho
 			var->floatval = value.floatval;
 			var->resetFloatval = value.floatval;
 			var->latchedFloatval = value.floatval;
-			var->fmin = limits.fmin;
-			var->fmax = limits.fmax;
+			var->limits = limits;
 			break;
 		case CVAR_VEC2:
 		case CVAR_VEC3:
 		case CVAR_VEC4:
-			var->fmin = limits.fmin;
-			var->fmax = limits.fmax;
+			var->limits = limits;
 			memcpy(var->vec4, value.vec4, sizeof(var->vec4));
 			memcpy(var->resetVec4, value.vec4, sizeof(var->resetVec4));
 			memcpy(var->latchedVec4, value.vec4, sizeof(var->latchedVec4));
@@ -787,18 +761,17 @@ static cvar_t *Cvar_Register(const char* var_name, cvarType_t type, unsigned sho
 			var->latchedColor = value.color;
 			break;
 		case CVAR_ENUM:
-			var->integer = value.enumval.integer;
-			var->resetInteger = value.enumval.integer;
-			var->latchedInteger = value.enumval.integer;
-			var->imin = 0;
-			var->enumStr = value.enumval.strings;
+			var->integer = value.integer;
+			var->resetInteger = value.integer;
+			var->latchedInteger = value.integer;
+			var->limits.imin = 0;
+			var->limits.enumStr = limits.enumStr;
 			break;
 		case CVAR_INT:
 			var->integer = value.integer;
 			var->resetInteger = value.integer;
 			var->latchedInteger = value.integer;
-			var->imin = limits.imin;
-			var->imax = limits.imax;
+			var->limits = limits;
 			break;
 		case CVAR_STRING:
 			var->string = CopyString( value.string );
@@ -806,7 +779,7 @@ static cvar_t *Cvar_Register(const char* var_name, cvarType_t type, unsigned sho
 			var->latchedString = CopyString( value.string );
 	}
 	cvar_modifiedFlags |= var->flags;
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 	return var;
 }
 
@@ -825,34 +798,34 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 	if (!var)
 		return 0;
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	if(force == qfalse)
 	{
 		if(var->flags & CVAR_ROM)
 		{
-			Com_Printf ("%s is read only.\n", var->name);
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Com_Printf(CON_CHANNEL_CVAR,"%s is read only.\n", var->name);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return 0;
 		}
 
 		if (var->flags & CVAR_INIT)
 		{
-			Com_Printf ("%s is write protected.\n", var->name);
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Com_Printf(CON_CHANNEL_CVAR,"%s is write protected.\n", var->name);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return 0;
 		}
 
 		if ( (var->flags & CVAR_CHEAT) && !cvar_cheats->boolean )
 		{
-			Com_Printf ("%s is cheat protected.\n", var->name);
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Com_Printf(CON_CHANNEL_CVAR,"%s is cheat protected.\n", var->name);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return 0;
 		}
 
 		if(var->flags & CVAR_LATCH)
 		{
-			Com_Printf ("%s will be changed upon restarting.\n", var->name);
+			Com_Printf(CON_CHANNEL_CVAR,"%s will be changed upon restarting.\n", var->name);
 			latched = 1;
 		}
 	}
@@ -861,7 +834,7 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 		case CVAR_BOOL:
 			if((var->boolean && value.boolean) || (!var->boolean && !value.boolean))
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return 0;
 			}
 			if(value.boolean){
@@ -875,19 +848,19 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 		case CVAR_FLOAT:
 			if(var->floatval == value.floatval)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return 0;
 			}
 			if(isnan(value.floatval))
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return -1;
 			}
-			if(value.floatval < var->fmin || value.floatval > var->fmax)
+			if(value.floatval < var->limits.fmin || value.floatval > var->limits.fmax)
 			{
-				Com_Printf ("\'%g\' is not a valid value for cvar '%s'\n", value.floatval, var->name);
-				Com_Printf ("Domain is any float in range between \'%g\' and \'%g\'\n", var->fmin, var->fmax);
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Com_Printf(CON_CHANNEL_CVAR,"\'%g\' is not a valid value for cvar '%s'\n", value.floatval, var->name);
+				Com_Printf(CON_CHANNEL_CVAR,"Domain is any float in range between \'%g\' and \'%g\'\n", var->limits.fmin, var->limits.fmax);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return -1;
 			}
 			if(!latched) var->floatval = value.floatval;
@@ -898,14 +871,14 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 			{
 				if(isnan(value.vec2[i]))
 				{
-					Sys_LeaveCriticalSection(CRIT_CVAR);
+					Sys_LeaveCriticalSection(CRITSECT_CVAR);
 					return -1;
 				}
-				if(value.vec2[i] < var->fmin || value.vec2[i] > var->fmax)
+				if(value.vec2[i] < var->limits.fmin || value.vec2[i] > var->limits.fmax)
 				{
-					Com_Printf ("\'%g\' is not a valid value for cvar '%s'\n", value.vec2[i], var->name);
-					Com_Printf ("Domain is any float in range between \'%g\' and \'%g\'\n", var->fmin, var->fmax);
-					Sys_LeaveCriticalSection(CRIT_CVAR);
+					Com_Printf(CON_CHANNEL_CVAR,"\'%g\' is not a valid value for cvar '%s'\n", value.vec2[i], var->name);
+					Com_Printf(CON_CHANNEL_CVAR,"Domain is any float in range between \'%g\' and \'%g\'\n", var->limits.fmin, var->limits.fmax);
+					Sys_LeaveCriticalSection(CRITSECT_CVAR);
 					return -1;
 				}
 			}
@@ -920,14 +893,14 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 			{
 				if(isnan(value.vec3[i]))
 				{
-					Sys_LeaveCriticalSection(CRIT_CVAR);
+					Sys_LeaveCriticalSection(CRITSECT_CVAR);
 					return -1;
 				}
-				if(value.vec3[i] < var->fmin || value.vec3[i] > var->fmax)
+				if(value.vec3[i] < var->limits.fmin || value.vec3[i] > var->limits.fmax)
 				{
-					Com_Printf ("\'%g\' is not a valid value for cvar '%s'\n", value.vec3[i], var->name);
-					Com_Printf ("Domain is any float in range between \'%g\' and \'%g\'\n", var->fmin, var->fmax);
-					Sys_LeaveCriticalSection(CRIT_CVAR);
+					Com_Printf(CON_CHANNEL_CVAR,"\'%g\' is not a valid value for cvar '%s'\n", value.vec3[i], var->name);
+					Com_Printf(CON_CHANNEL_CVAR,"Domain is any float in range between \'%g\' and \'%g\'\n", var->limits.fmin, var->limits.fmax);
+					Sys_LeaveCriticalSection(CRITSECT_CVAR);
 					return -1;
 				}
 			}
@@ -942,14 +915,14 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 			{
 				if(isnan(value.vec4[i]))
 				{
-					Sys_LeaveCriticalSection(CRIT_CVAR);
+					Sys_LeaveCriticalSection(CRITSECT_CVAR);
 					return -1;
 				}
-				if(value.vec4[i] < var->fmin || value.vec4[i] > var->fmax)
+				if(value.vec4[i] < var->limits.fmin || value.vec4[i] > var->limits.fmax)
 				{
-					Com_Printf ("\'%g\' is not a valid value for cvar '%s'\n", value.vec4[i], var->name);
-					Com_Printf ("Domain is any float in range between \'%g\' and \'%g\'\n", var->fmin, var->fmax);
-					Sys_LeaveCriticalSection(CRIT_CVAR);
+					Com_Printf(CON_CHANNEL_CVAR,"\'%g\' is not a valid value for cvar '%s'\n", value.vec4[i], var->name);
+					Com_Printf(CON_CHANNEL_CVAR,"Domain is any float in range between \'%g\' and \'%g\'\n", var->limits.fmin, var->limits.fmax);
+					Sys_LeaveCriticalSection(CRITSECT_CVAR);
 					return -1;
 				}
 			}
@@ -966,23 +939,23 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 		case CVAR_ENUM:
 			if(var->integer == value.integer)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return 0;
 			}
-			if(var->enumStr == NULL)
+			if(var->limits.enumStr == NULL)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return -1;
 			}
-			for(i = 0; var->enumStr[i] != NULL && i != value.integer; i++ );
-			if(var->enumStr[i] == NULL)
+			for(i = 0; var->limits.enumStr[i] != NULL && i != value.integer; i++ );
+			if(var->limits.enumStr[i] == NULL)
 			{
-				Com_Printf ("\'%d\' is not a valid value for cvar '%s'\n", value.integer, var->name);
-				Com_Printf ("  Domain is one of the following:\n");
-				for(i = 0; var->enumStr[i] != NULL; i++ ){
-					Com_Printf ("   %d: %s\n",i, var->enumStr[i]);
+				Com_Printf(CON_CHANNEL_CVAR,"\'%d\' is not a valid value for cvar '%s'\n", value.integer, var->name);
+				Com_Printf(CON_CHANNEL_CVAR,"  Domain is one of the following:\n");
+				for(i = 0; var->limits.enumStr[i] != NULL; i++ ){
+					Com_Printf(CON_CHANNEL_CVAR,"   %d: %s\n",i, var->limits.enumStr[i]);
 				}
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return -1;
 			}
 			if(!latched) var->integer = value.integer;
@@ -991,14 +964,14 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 		case CVAR_INT:
 			if(var->integer == value.integer)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return 0;
 			}
-			if(value.integer < var->imin || value.integer > var->imax)
+			if(value.integer < var->limits.imin || value.integer > var->limits.imax)
 			{
-				Com_Printf ("\'%d\' is not a valid value for cvar '%s'\n", value.integer, var->name);
-				Com_Printf ("  Domain is any integer in range between \'%d\' and \'%d\'\n", var->imin, var->imax);
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Com_Printf(CON_CHANNEL_CVAR,"\'%d\' is not a valid value for cvar '%s'\n", value.integer, var->name);
+				Com_Printf(CON_CHANNEL_CVAR,"  Domain is any integer in range between \'%d\' and \'%d\'\n", var->limits.imin, var->limits.imax);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return -1;
 			}
 			if(!latched) var->integer = value.integer;
@@ -1007,12 +980,12 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 		case CVAR_STRING:
 			if(!value.string)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return 0;
 			}
 			if(var->string && !Q_stricmp(var->string, value.string))
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return 0;
 			}
 			if(!latched)
@@ -1031,7 +1004,7 @@ static int Cvar_SetVariant( cvar_t *var, CvarValue value ,qboolean force ) {
 	// note what types of cvars have been modified (userinfo, archive, serverinfo, systeminfo)
 	cvar_modifiedFlags |= var->flags;
 	var->modified = qtrue;
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 	return 1;
 }
 
@@ -1051,14 +1024,14 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 	vec4_t colorConv;
 
 	if ( !Cvar_ValidateString( var_name ) ) {
-		Com_Printf("invalid cvar name string: %s\n", var_name );
+		Com_Printf(CON_CHANNEL_CVAR,"invalid cvar name string: %s\n", var_name );
 		return;
 	}
 
 	if(valueStr == NULL)
 		return;
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	var = Cvar_FindVar(var_name);
 	if(var)
@@ -1066,14 +1039,14 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 		if(!force){
 			if(var->flags & CVAR_ROM)
 			{
-				Com_Printf ("%s is read only.\n", var->name);
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Com_Printf(CON_CHANNEL_CVAR,"%s is read only.\n", var->name);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 			if (var->flags & CVAR_INIT)
 			{
-				Com_Printf ("%s is write protected.\n", var->name);
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Com_Printf(CON_CHANNEL_CVAR,"%s is write protected.\n", var->name);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 		}
@@ -1093,7 +1066,7 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 				value.boolean = integer;
 				Cvar_SetVariant( var, value, force );
 			}
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		case CVAR_FLOAT:
 			if(isFloat(valueStr, 0))
@@ -1102,7 +1075,7 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 				value.floatval = floatval;
 				Cvar_SetVariant( var, value, force );
 			}
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		case CVAR_VEC2:
 			if(isVector(valueStr, 0, 2))
@@ -1110,7 +1083,7 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 				strToVect(valueStr ,value.vec2, 2);
 				Cvar_SetVariant( var, value, force );
 			}
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		case CVAR_VEC3:
 			if(isVector(valueStr, 0, 3))
@@ -1118,7 +1091,7 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 				strToVect(valueStr ,value.vec3, 3);
 				Cvar_SetVariant( var, value, force );
 			}
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		case CVAR_COLOR:
 			if(isVector(valueStr, 0, 4))
@@ -1129,14 +1102,14 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 				strToVect(valueStr ,colorConv, 3);
 				value.color.rgba[3] = 0x0;
 			}else{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 			value.color.rgba[0] = (byte)((float)0xff * colorConv[0]);
 			value.color.rgba[1] = (byte)((float)0xff * colorConv[1]);
 			value.color.rgba[2] = (byte)((float)0xff * colorConv[2]);
 			Cvar_SetVariant( var, value, force );
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		case CVAR_VEC4:
 			if(isVector(valueStr, 0, 4))
@@ -1144,7 +1117,7 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 				strToVect(valueStr ,value.vec4, 4);
 				Cvar_SetVariant( var, value, force );
 			}
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		case CVAR_ENUM:
 		case CVAR_INT:
@@ -1154,12 +1127,12 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 				value.integer = integer;
 				Cvar_SetVariant( var, value, force );
 			}
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		case CVAR_STRING:
 			value.string = valueStr;
 			Cvar_SetVariant( var, value, force );
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		}
 	}
@@ -1175,7 +1148,7 @@ void Cvar_Set2( const char *var_name, const char *valueStr, qboolean force ) {
 	} else {
 		Cvar_Register( var_name, CVAR_STRING, 0, value, limits, "");
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 }
 
 /*
@@ -1189,11 +1162,11 @@ void Cvar_SetWithType( const char *var_name, CvarValue value, cvarType_t type, q
 	CvarLimits limits;
 
 	if ( !Cvar_ValidateString( var_name ) ) {
-		Com_Printf("invalid cvar name string: %s\n", var_name );
+		Com_Printf(CON_CHANNEL_CVAR,"invalid cvar name string: %s\n", var_name );
 		return;
 	}
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	var = Cvar_FindVar(var_name);
 
@@ -1202,11 +1175,11 @@ void Cvar_SetWithType( const char *var_name, CvarValue value, cvarType_t type, q
 		if(type == var->type)
 		{
 			Cvar_SetVariant( var, value, force );
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		}else if(force && !(var->flags & CVAR_USER_CREATED)){
 			Com_Error(ERR_FATAL, "Cvar_SetWithType: Existing Cvar %s has a different type. Old type: %d New type: %d", var->name, var->type, type);
-			Sys_LeaveCriticalSection(CRIT_CVAR);
+			Sys_LeaveCriticalSection(CRITSECT_CVAR);
 			return;
 		}
 	}
@@ -1227,7 +1200,7 @@ void Cvar_SetWithType( const char *var_name, CvarValue value, cvarType_t type, q
 	} else {
 		Cvar_Register( var_name, CVAR_STRING, 0, value, limits, "External Cvar");
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 }
 
 
@@ -1465,12 +1438,12 @@ void Cvar_Reset( const char *var_name )
 
 	cvar_t *var;
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	var = Cvar_FindVar(var_name);
 
 	Cvar_ResetVar( var );
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
@@ -1487,7 +1460,7 @@ void Cvar_SetCheatState( void ) {
 
     cvar_t	*var;
     CvarValue cval;
-		Sys_EnterCriticalSection(CRIT_CVAR);
+		Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	// set all default vars to the safe value
     for ( var = cvar_vars ; var ; var = var->next ) {
@@ -1530,7 +1503,7 @@ void Cvar_SetCheatState( void ) {
 							Cvar_SetVariant( var, cval , qtrue);
 			}
     }
-		Sys_LeaveCriticalSection(CRIT_CVAR);
+		Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
@@ -1614,29 +1587,29 @@ void Cvar_ValueToStr(cvar_t const *cvar, char* bufvalue, int sizevalue, char* bu
 			if(buflatch) Com_sprintf(buflatch, sizelatch, "%s", cvar->latchedString);
 			return;
 		case CVAR_ENUM:
-			if(cvar->enumStr)
+			if(cvar->limits.enumStr)
 			{
 				if(bufvalue)
 				{
-					for(i = 0; cvar->enumStr[i] != NULL && i != cvar->integer; i++ );
-					if(cvar->enumStr[i] != NULL)
-						Com_sprintf(bufvalue, sizevalue, "%s", cvar->enumStr[i]);
+					for(i = 0; cvar->limits.enumStr[i] != NULL && i != cvar->integer; i++ );
+					if(cvar->limits.enumStr[i] != NULL)
+						Com_sprintf(bufvalue, sizevalue, "%s", cvar->limits.enumStr[i]);
 					else
 						Com_sprintf(bufvalue, sizevalue, "Out of Range value");
 				}
 				if(bufreset)
 				{
-					for(i = 0; cvar->enumStr[i] != NULL && i != cvar->resetInteger; i++ );
-					if(cvar->enumStr[i] != NULL)
-						Com_sprintf(bufreset, sizereset, "%s", cvar->enumStr[i]);
+					for(i = 0; cvar->limits.enumStr[i] != NULL && i != cvar->resetInteger; i++ );
+					if(cvar->limits.enumStr[i] != NULL)
+						Com_sprintf(bufreset, sizereset, "%s", cvar->limits.enumStr[i]);
 					else
 						Com_sprintf(bufreset, sizereset, "Out of Range value");
 				}
 				if(buflatch)
 				{
-					for(i = 0; cvar->enumStr[i] != NULL && i != cvar->latchedInteger; i++ );
-					if(cvar->enumStr[i] != NULL)
-						Com_sprintf(buflatch, sizelatch, "%s", cvar->enumStr[i]);
+					for(i = 0; cvar->limits.enumStr[i] != NULL && i != cvar->latchedInteger; i++ );
+					if(cvar->limits.enumStr[i] != NULL)
+						Com_sprintf(buflatch, sizelatch, "%s", cvar->limits.enumStr[i]);
 					else
 						Com_sprintf(buflatch, sizelatch, "Out of Range value");
 				}
@@ -1666,12 +1639,12 @@ qboolean Cvar_Command( void ) {
 	char reset[8192];
 	char latch[8192];
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	// check variables
 	v = Cvar_FindVar (Cmd_Argv(0));
 	if (!v) {
-		Sys_LeaveCriticalSection(CRIT_CVAR);
+		Sys_LeaveCriticalSection(CRITSECT_CVAR);
 		return qfalse;
 	}
 
@@ -1680,20 +1653,20 @@ qboolean Cvar_Command( void ) {
 		Cvar_ValueToStr(v, value, sizeof(value), reset, sizeof(reset), latch, sizeof(latch));
 
 		if(v->description != NULL)
-			Com_Printf ("\"%s\" is: \"%s" S_COLOR_WHITE "\" default: \"%s" S_COLOR_WHITE "\" info: \"%s" S_COLOR_WHITE "\"\n", v->name, value, reset, v->description );
+			Com_Printf(CON_CHANNEL_CVAR,"\"%s\" is: \"%s" S_COLOR_WHITE "\" default: \"%s" S_COLOR_WHITE "\" info: \"%s" S_COLOR_WHITE "\"\n", v->name, value, reset, v->description );
 		else
-			Com_Printf ("\"%s\" is: \"%s" S_COLOR_WHITE "\" default: \"%s" S_COLOR_WHITE "\"\n", v->name, value, reset );
+			Com_Printf(CON_CHANNEL_CVAR,"\"%s\" is: \"%s" S_COLOR_WHITE "\" default: \"%s" S_COLOR_WHITE "\"\n", v->name, value, reset );
 
 		if ( Q_stricmp(value, latch) ) {
-			Com_Printf( "latched: \"%s\"\n", latch );
+			Com_Printf(CON_CHANNEL_CVAR, "latched: \"%s\"\n", latch );
 		}
-		Sys_LeaveCriticalSection(CRIT_CVAR);
+		Sys_LeaveCriticalSection(CRITSECT_CVAR);
 		return qtrue;
 	}
 
 	// set the value if forcing isn't required
 	Cvar_Set2 (v->name, Cmd_Argv(1), qfalse);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 	return qtrue;
 }
 
@@ -1710,7 +1683,7 @@ void Cvar_Toggle_f( void ) {
 	mvabuf;
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Printf ("usage: toggle <variable>\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"usage: toggle <variable>\n");
 		return;
 	}
 
@@ -1735,7 +1708,7 @@ void Cvar_Set_f( void ) {
 
 	c = Cmd_Argc();
 	if ( c < 3 ) {
-		Com_Printf ("usage: set <variable> <value>\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"usage: set <variable> <value>\n");
 		return;
 	}
 
@@ -1771,23 +1744,23 @@ void Cvar_SetFromCvar_f( void ) {
 
 	c = Cmd_Argc();
 	if ( c < 3 ) {
-		Com_Printf ("usage: setfromcvar <dest_cvar> <source_cvar>\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"usage: setfromcvar <dest_cvar> <source_cvar>\n");
 		return;
 	}
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	v = Cvar_FindVar( Cmd_Argv( 2 ) );
 
 	if(!v)
 	{
-		Com_Printf ("cvar %s does not exist\n", Cmd_Argv( 2 ));
-		Sys_LeaveCriticalSection(CRIT_CVAR);
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"cvar %s does not exist\n", Cmd_Argv( 2 ));
+		Sys_LeaveCriticalSection(CRITSECT_CVAR);
 		return;
 	}
 
 	Cvar_ValueToStr(v, value, sizeof(value), NULL, 0, NULL, 0);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 	Cvar_Set2 (Cmd_Argv(1), value, qfalse);
 }
@@ -1806,7 +1779,7 @@ void Cvar_SetToTime_f( void ) {
 
 	c = Cmd_Argc();
 	if ( c != 2 ) {
-		Com_Printf ("usage: setcvartotime <variablename>\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"usage: setcvartotime <variablename>\n");
 		return;
 	}
 
@@ -1828,20 +1801,20 @@ void Cvar_SetU_f( void ) {
 	cvar_t	*v;
 
 	if ( Cmd_Argc() < 3 ) {
-		Com_Printf ("usage: setu <variable> <value>\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"usage: setu <variable> <value>\n");
 		return;
 	}
 	Cvar_Set_f();
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	v = Cvar_FindVar( Cmd_Argv( 1 ) );
 	if ( !v ) {
-		Sys_LeaveCriticalSection(CRIT_CVAR);
+		Sys_LeaveCriticalSection(CRITSECT_CVAR);
 		return;
 	}
 	Cvar_AddFlags(v, CVAR_USERINFO);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
@@ -1856,20 +1829,20 @@ void Cvar_SetS_f( void ) {
 	cvar_t	*v;
 
 	if ( Cmd_Argc() < 3 ) {
-		Com_Printf ("usage: sets <variable> <value>\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"usage: sets <variable> <value>\n");
 		return;
 	}
 	Cvar_Set_f();
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	v = Cvar_FindVar( Cmd_Argv( 1 ) );
 	if ( !v ) {
-		Sys_LeaveCriticalSection(CRIT_CVAR);
+		Sys_LeaveCriticalSection(CRITSECT_CVAR);
 		return;
 	}
 	Cvar_AddFlags(v, CVAR_SERVERINFO);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
@@ -1884,21 +1857,21 @@ void Cvar_SetA_f( void ) {
 	cvar_t	*v;
 
 	if ( Cmd_Argc() < 3 ) {
-		Com_Printf ("usage: seta <variable> <value>\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"usage: seta <variable> <value>\n");
 		return;
 	}
 	Cvar_Set_f();
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	v = Cvar_FindVar( Cmd_Argv( 1 ) );
 	if ( !v ) {
-		Sys_LeaveCriticalSection(CRIT_CVAR);
+		Sys_LeaveCriticalSection(CRITSECT_CVAR);
 		return;
 	}
 	Cvar_AddFlags(v, CVAR_ARCHIVE);
 	cvar_archivedset = qtrue;
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
@@ -1909,7 +1882,7 @@ Cvar_Reset_f
 */
 void Cvar_Reset_f( void ) {
 	if ( Cmd_Argc() != 2 ) {
-		Com_Printf ("usage: reset <variable>\n");
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"usage: reset <variable>\n");
 		return;
 	}
 	Cvar_Reset( Cmd_Argv( 1 ) );
@@ -1930,7 +1903,7 @@ void Cvar_WriteVariables(fileHandle_t f)
 	char	bufferlatch[8192];
 	char	buffer[8192];
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	for (var = cvar_vars; var; var = var->next)
 	{
@@ -1941,14 +1914,14 @@ void Cvar_WriteVariables(fileHandle_t f)
 			// write the latched value, even if it hasn't taken effect yet
 			if ( bufferlatch[0] ) {
 				if( strlen( var->name ) + strlen( bufferlatch ) + 10 > sizeof( buffer ) ) {
-					Com_Printf( S_COLOR_YELLOW "WARNING: value of variable "
+					Com_Printf(CON_CHANNEL_CVAR, S_COLOR_YELLOW "WARNING: value of variable "
 							"\"%s\" too long to write to file\n", var->name );
 					continue;
 				}
 				Com_sprintf (buffer, sizeof(buffer), "seta %s \"%s\"\n", var->name, bufferlatch);
 			} else {
 				if( strlen( var->name ) + strlen( bufferval ) + 10 > sizeof( buffer ) ) {
-					Com_Printf( S_COLOR_YELLOW "WARNING: value of variable "
+					Com_Printf(CON_CHANNEL_CVAR, S_COLOR_YELLOW "WARNING: value of variable "
 							"\"%s\" too long to write to file\n", var->name );
 					continue;
 				}
@@ -1957,7 +1930,7 @@ void Cvar_WriteVariables(fileHandle_t f)
 			FS_Write( buffer, strlen( buffer ), f );
 		}
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
@@ -1976,13 +1949,13 @@ void Cvar_List_f( void ) {
 
 	if ( Cmd_Argc() > 1 ) {
 		match = Cmd_Argv( 1 );
-		Com_Printf("Displaying all cvars starting with: %s\n", match);
+		Com_Printf(CON_CHANNEL_DONT_FILTER,"Displaying all cvars starting with: %s\n", match);
 	} else {
 		match = NULL;
 	}
-	Com_Printf("====================================== Cvar List ======================================\n");
+	Com_Printf(CON_CHANNEL_DONT_FILTER,"====================================== Cvar List ======================================\n");
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	i = 0;
 	for (var = cvar_vars ; var ; var = var->next, i++)
@@ -1990,49 +1963,49 @@ void Cvar_List_f( void ) {
 		if (match && !Com_Filter(match, var->name, qfalse)) continue;
 
 		if (var->flags & CVAR_SERVERINFO) {
-			Com_Printf("S");
+			Com_Printf(CON_CHANNEL_DONT_FILTER,"S");
 		} else {
-			Com_Printf(" ");
+			Com_Printf(CON_CHANNEL_DONT_FILTER," ");
 		}
 		if (var->flags & CVAR_USERINFO) {
-			Com_Printf("U");
+			Com_Printf(CON_CHANNEL_DONT_FILTER,"U");
 		} else {
-			Com_Printf(" ");
+			Com_Printf(CON_CHANNEL_DONT_FILTER," ");
 		}
 		if (var->flags & CVAR_ROM) {
-			Com_Printf("R");
+			Com_Printf(CON_CHANNEL_DONT_FILTER,"R");
 		} else {
-			Com_Printf(" ");
+			Com_Printf(CON_CHANNEL_DONT_FILTER," ");
 		}
 		if (var->flags & CVAR_INIT) {
-			Com_Printf("I");
+			Com_Printf(CON_CHANNEL_DONT_FILTER,"I");
 		} else {
-			Com_Printf(" ");
+			Com_Printf(CON_CHANNEL_DONT_FILTER," ");
 		}
 		if (var->flags & CVAR_ARCHIVE) {
-			Com_Printf("A");
+			Com_Printf(CON_CHANNEL_DONT_FILTER,"A");
 		} else {
-			Com_Printf(" ");
+			Com_Printf(CON_CHANNEL_DONT_FILTER," ");
 		}
 		if (var->flags & CVAR_LATCH) {
-			Com_Printf("L");
+			Com_Printf(CON_CHANNEL_DONT_FILTER,"L");
 		} else {
-			Com_Printf(" ");
+			Com_Printf(CON_CHANNEL_DONT_FILTER," ");
 		}
 		if (var->flags & CVAR_CHEAT) {
-			Com_Printf("C");
+			Com_Printf(CON_CHANNEL_DONT_FILTER,"C");
 		} else {
-			Com_Printf(" ");
+			Com_Printf(CON_CHANNEL_DONT_FILTER," ");
 		}
 		Cvar_ValueToStr(var, value, sizeof(value), NULL, 0, NULL, 0);
-		Com_Printf (" %s \"%s\"\n", var->name, value);
+		Com_Printf(CON_CHANNEL_DONT_FILTER," %s \"%s\"\n", var->name, value);
 	}
 
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
-	Com_Printf ("\n%i total cvars\n", i);
-	Com_Printf ("%i cvar indexes\n", cvar_numIndexes);
-	Com_Printf("==================================== End Cvar List ====================================\n");
+	Com_Printf(CON_CHANNEL_DONT_FILTER,"\n%i total cvars\n", i);
+	Com_Printf(CON_CHANNEL_DONT_FILTER,"%i cvar indexes\n", cvar_numIndexes);
+	Com_Printf(CON_CHANNEL_DONT_FILTER,"==================================== End Cvar List ====================================\n");
 }
 
 /*
@@ -2046,7 +2019,7 @@ void Cvar_Restart_f( void ) {
 	cvar_t	*var;
 	cvar_t	**prev;
 
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	prev = &cvar_vars;
 	while ( 1 ) {
@@ -2106,7 +2079,7 @@ void Cvar_Restart_f( void ) {
 
 		prev = &var->next;
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 }
 
 /*
@@ -2121,7 +2094,7 @@ char	*Cvar_InfoString( int bit ) {
 	cvar_t	*var;
 
 	info[0] = 0;
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	for (var = cvar_vars ; var ; var = var->next) {
 		if (var->flags & bit) {
@@ -2132,13 +2105,8 @@ char	*Cvar_InfoString( int bit ) {
 			Info_SetValueForKey (info, var->name, value);
 		}
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 	return info;
-}
-
-char	*Cvar_InfoString_IW_Wrapper( int dummy, int bit )
-{
-    return Cvar_InfoString( bit );
 }
 
 
@@ -2158,7 +2126,7 @@ char	*Cvar_InfoString_Big( int bit, char* buf, int len )
 	cvar_t	*var;
 
 	info[0] = 0;
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	for (var = cvar_vars ; var ; var = var->next) {
 		if (var->flags & bit) {
@@ -2166,11 +2134,12 @@ char	*Cvar_InfoString_Big( int bit, char* buf, int len )
 				Cvar_ValueToStr(var, value, sizeof(value), NULL, 0, NULL, 0);
 			else
 				Com_sprintf(value, sizeof(value), "%d", var->boolean);
-			BigInfo_SetValueForKey (info, var->name, value);		}
+			BigInfo_SetValueForKey (info, var->name, value);
+		}
 	}
 
 	Q_strncpyz(buf, info, len);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 	return buf;
 }
@@ -2185,12 +2154,12 @@ Cvar_ForEach
 void Cvar_ForEach( void (*callback)(cvar_t const*, void*), void* handoverarg )
 {
 	cvar_t	*var;
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	for (var = cvar_vars ; var ; var = var->next) {
 		callback(var, handoverarg);
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
@@ -2211,7 +2180,7 @@ char	*Cvar_DisplayableValue( cvar_t const *var) {
 	return value;
 }
 
-static const char	*Cvar_DisplayableValueMT( cvar_t const *var, char* value, int maxlen) {
+char	*Cvar_DisplayableValueMT( cvar_t const *var, char* value, int maxlen) {
 
 	if(!var)
 		value[0] = '\0';
@@ -2411,11 +2380,12 @@ cvar_t* Cvar_RegisterEnum(const char* name, const char** strings, int integer, u
 	CvarLimits limits;
 	CvarValue value;
 
-	limits.fmin = 0;
-	limits.fmax = 0;
+	assert(strings[0] != NULL);
 
-	value.enumval.strings = strings;
-	value.enumval.integer = integer;
+	limits.imin = 0;
+	limits.enumStr = strings;
+
+	value.integer = integer;
 
 	cvar = Cvar_Register(name, CVAR_ENUM, flags, value, limits, description);
 
@@ -2466,13 +2436,13 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 {
 
 	int i;
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	switch(var->type){
 		case CVAR_BOOL:
 			if((var->resetBoolean && value.boolean) || (!var->resetBoolean && !value.boolean))
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 			if(value.boolean){
@@ -2484,19 +2454,19 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 		case CVAR_FLOAT:
 			if(var->resetFloatval == value.floatval)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 			if(isnan(value.floatval))
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
-			if(value.floatval < var->fmin || value.floatval > var->fmax)
+			if(value.floatval < var->limits.fmin || value.floatval > var->limits.fmax)
 			{
-				Com_Printf ("\'%g\' is not a valid value for cvar '%s'\n", value.floatval, var->name);
-				Com_Printf ("Domain is any float in range between \'%g\' and \'%g\'\n", var->fmin, var->fmax);
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Com_Printf(CON_CHANNEL_CVAR,"\'%g\' is not a valid value for cvar '%s'\n", value.floatval, var->name);
+				Com_Printf(CON_CHANNEL_CVAR,"Domain is any float in range between \'%g\' and \'%g\'\n", var->limits.fmin, var->limits.fmax);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 			var->resetFloatval = value.floatval;
@@ -2506,7 +2476,7 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 			{
 				if(isnan(value.vec2[i]))
 				{
-					Sys_LeaveCriticalSection(CRIT_CVAR);
+					Sys_LeaveCriticalSection(CRITSECT_CVAR);
 					return;
 				}
 				var->resetVec2[i] = value.vec2[i];
@@ -2517,7 +2487,7 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 			{
 				if(isnan(value.vec3[i]))
 				{
-					Sys_LeaveCriticalSection(CRIT_CVAR);
+					Sys_LeaveCriticalSection(CRITSECT_CVAR);
 					return;
 				}
 				var->resetVec3[i] = value.vec3[i];
@@ -2529,7 +2499,7 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 			{
 				if(isnan(value.vec4[i]))
 				{
-					Sys_LeaveCriticalSection(CRIT_CVAR);
+					Sys_LeaveCriticalSection(CRITSECT_CVAR);
 					return;
 				}
 				var->resetVec4[i] = value.vec4[i];
@@ -2538,23 +2508,23 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 		case CVAR_ENUM:
 			if(var->resetInteger == value.integer)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
-			if(var->enumStr == NULL)
+			if(var->limits.enumStr == NULL)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
-			for(i = 0; var->enumStr[i] != NULL && i != value.integer; i++ );
-			if(var->enumStr[i] == NULL)
+			for(i = 0; var->limits.enumStr[i] != NULL && i != value.integer; i++ );
+			if(var->limits.enumStr[i] == NULL)
 			{
-				Com_Printf ("\'%d\' is not a valid value for cvar '%s'\n", value.integer, var->name);
-				Com_Printf ("  Domain is one of the following:\n");
-				for(i = 0; var->enumStr[i] != NULL; i++ )
-					Com_Printf ("   %d: %s\n", var->enumStr[i]);
+				Com_Printf(CON_CHANNEL_CVAR,"\'%d\' is not a valid value for cvar '%s'\n", value.integer, var->name);
+				Com_Printf(CON_CHANNEL_CVAR,"  Domain is one of the following:\n");
+				for(i = 0; var->limits.enumStr[i] != NULL; i++ )
+					Com_Printf(CON_CHANNEL_CVAR,"   %d: %s\n", i, var->limits.enumStr[i]);
 
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 			var->resetInteger = value.integer;
@@ -2562,14 +2532,14 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 		case CVAR_INT:
 			if(var->resetInteger == value.integer)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
-			if(value.integer < var->imin || value.integer > var->imax)
+			if(value.integer < var->limits.imin || value.integer > var->limits.imax)
 			{
-				Com_Printf ("\'%d\' is not a valid value for cvar '%s'\n", value.integer, var->name);
-				Com_Printf ("  Domain is any integer in range between \'%d\' and \'%d\'\n", var->imin, var->imax);
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Com_Printf(CON_CHANNEL_CVAR,"\'%d\' is not a valid value for cvar '%s'\n", value.integer, var->name);
+				Com_Printf(CON_CHANNEL_CVAR,"  Domain is any integer in range between \'%d\' and \'%d\'\n", var->limits.imin, var->limits.imax);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 			var->resetInteger = value.integer;
@@ -2577,12 +2547,12 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 		case CVAR_STRING:
 			if(!value.string)
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 			if(var->resetString && !Q_stricmp(var->resetString, value.string))
 			{
-				Sys_LeaveCriticalSection(CRIT_CVAR);
+				Sys_LeaveCriticalSection(CRITSECT_CVAR);
 				return;
 			}
 			if(var->resetString && var->resetString != nullstring)
@@ -2590,7 +2560,7 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 
 			var->resetString = CopyString( value.string );
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
@@ -2598,34 +2568,34 @@ void Cvar_ChangeResetValue(cvar_t* var, CvarValue value)
 
 void Cvar_AddFlagsByName(const char* var_name, unsigned short flags)
 {
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 	cvar_t	*var = Cvar_FindVar(var_name);
 	if(!var)
 	{
-		Com_PrintError("Cvar_AddFlagsByName: Cvar %s does not exist\n", var_name);
+		Com_PrintError(CON_CHANNEL_CVAR,"Cvar_AddFlagsByName: Cvar %s does not exist\n", var_name);
 	}
 	Cvar_AddFlags(var, flags);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
 void Cvar_ClearFlagsForEach(unsigned short flags)
 {
 	cvar_t	*var;
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 
 	for (var = cvar_vars ; var ; var = var->next) {
 		Cvar_ClearFlags(var, flags);
 	}
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 
 }
 
 qboolean Cvar_IsDefined(const char* cvarname)
 {
-	Sys_EnterCriticalSection(CRIT_CVAR);
+	Sys_EnterCriticalSection(CRITSECT_CVAR);
 	cvar_t* v = Cvar_FindVar(cvarname);
-	Sys_LeaveCriticalSection(CRIT_CVAR);
+	Sys_LeaveCriticalSection(CRITSECT_CVAR);
 	if(v)
 	{
 		return qtrue;
@@ -2633,26 +2603,61 @@ qboolean Cvar_IsDefined(const char* cvarname)
 	return qfalse;
 }
 
-
-void Cvar_PatchModifiedFlags()
+bool __cdecl Cvar_IsValidName(const char *dvarName)
 {
+  char nameChar;
+  int index;
 
-	*(int**)0x8123187 = &cvar_modifiedFlags;
-	*(int**)0x81231B9 = &cvar_modifiedFlags;
-	*(int**)0x8123747 = &cvar_modifiedFlags;
-	*(int**)0x8123959 = &cvar_modifiedFlags;
-	*(int**)0x81742F2 = &cvar_modifiedFlags;
-	*(int**)0x817519D = &cvar_modifiedFlags;
-	*(int**)0x81751C3 = &cvar_modifiedFlags;
-	*(int**)0x81775B5 = &cvar_modifiedFlags;
-	*(int**)0x81775C1 = &cvar_modifiedFlags;
-	*(int**)0x81775EF = &cvar_modifiedFlags;
-	*(int**)0x817762C = &cvar_modifiedFlags;
-	*(int**)0x819E5BC = &cvar_modifiedFlags;
-	*(int**)0x819FBAE = &cvar_modifiedFlags;
-	*(int**)0x81A0A28 = &cvar_modifiedFlags;
-	*(int**)0x8208F2B = &cvar_modifiedFlags;
-	*(int**)0x820956C = &cvar_modifiedFlags;
-	*(int**)0x81775CA = (int*)(((char*)&cvar_modifiedFlags) +1);
+  if ( dvarName )
+  {
+    for ( index = 0; dvarName[index]; ++index )
+    {
+      nameChar = dvarName[index];
+      if ( !isalnum(nameChar) && nameChar != '_' )
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
 
+
+void __cdecl Cvar_SetFromStringByName(const char* name, const char* value)
+{
+    Cvar_Set(name, value);
+}
+
+const char* __cdecl Cvar_EnumToString(cvar_t* var)
+{
+	return Cvar_DisplayableValue(var);
+}
+
+
+int __cdecl Com_SaveDvarsToBuffer(const char **dvarnames, unsigned int numDvars, char *buffer, unsigned int bufsize)
+{
+  const char *string;
+  int ret;
+  int written;
+  unsigned int i;
+  cvar_t *dvar;
+
+  ret = 1;
+  for ( i = 0; i < numDvars; ++i )
+  {
+    dvar = Cvar_FindVar(dvarnames[i]);
+
+    assert(dvar);
+
+    string = Cvar_DisplayableValue(dvar);
+    written = Com_sprintf(buffer, bufsize, "%s \"%s\"\n", dvar->name, string);
+    if ( written < 0 )
+    {
+      return 0;
+    }
+    buffer += written;
+    bufsize -= written;
+  }
+  return ret;
 }

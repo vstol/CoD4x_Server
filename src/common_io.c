@@ -53,6 +53,8 @@ qboolean Com_IsDeveloper( void ){ return qtrue; }
 #pragma message "Undefined function: Com_IsDeveloper"
 #endif
 
+cvar_t* com_logrcon;
+
 //============================================================================
 static char	*rd_buffer;
 static int	rd_buffersize;
@@ -86,19 +88,22 @@ void Com_StopRedirect (void)
 	rd_flush = NULL;
 }
 
-__cdecl void Com_PrintMessage( int dumbIWvar, char *msg, msgtype_t type) {
+__cdecl void Com_PrintMessage( conChannel_t channel, char *msg, msgtype_t type) {
 
 	//secures calls to Com_PrintMessage from recursion while redirect printing
 	static qboolean lock = qfalse;
 
-	if(dumbIWvar == 6) return;
-
+	if(channel == CON_CHANNEL_LOGFILEONLY)
+	{
+		Com_PrintLogfile( msg );
+		return;
+	}
 	int msglen = strlen(msg);
 
 	if(type != MSG_NORDPRINT && !lock)
 	{
 	
-		Sys_EnterCriticalSection(CRIT_REDIRECTPRINT);
+		Sys_EnterCriticalSection(CRITSECT_RD_BUFFER);
 
 		if ( !lock) {
 
@@ -106,11 +111,7 @@ __cdecl void Com_PrintMessage( int dumbIWvar, char *msg, msgtype_t type) {
 			Com_PrintRedirect(msg, msglen);
 			lock = qfalse;
 
-			if ( rd_buffer ) {
-				if(!rd_flush){
-					Sys_LeaveCriticalSection(CRIT_REDIRECTPRINT);
-					return;
-				}
+			if ( rd_buffer && rd_flush) {
 				if ((msglen + strlen(rd_buffer)) > (rd_buffersize - 1)) {
 
 					lock = qtrue;
@@ -119,16 +120,19 @@ __cdecl void Com_PrintMessage( int dumbIWvar, char *msg, msgtype_t type) {
 
 					*rd_buffer = 0;
 				}
-				Q_strcat(rd_buffer, rd_buffersize, msg);
+				Q_strncat(rd_buffer, rd_buffersize, msg);
 				// TTimo nooo .. that would defeat the purpose
 				//rd_flush(rd_buffer);
 				//*rd_buffer = 0;
-				Sys_LeaveCriticalSection(CRIT_REDIRECTPRINT);
-				return;
+				if(!com_logrcon->boolean)
+				{
+					Sys_LeaveCriticalSection(CRITSECT_RD_BUFFER);
+					return;
+				}
 			}
 		}
 		
-		Sys_LeaveCriticalSection(CRIT_REDIRECTPRINT);
+		Sys_LeaveCriticalSection(CRITSECT_RD_BUFFER);
 	
 	}
 
@@ -151,7 +155,7 @@ to the apropriate place.
 A raw string should NEVER be passed as fmt, because of "%f" type crashers.
 =============
 */
-void QDECL Com_Printf( const char *fmt, ... ) {
+void QDECL Com_Printf( conChannel_t channel, const char *fmt, ... ) {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
 
@@ -159,7 +163,7 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 	Q_vsnprintf (msg, sizeof(msg), fmt, argptr);
 	va_end (argptr);
 
-        Com_PrintMessage( 0, msg, MSG_DEFAULT);
+        Com_PrintMessage( channel, msg, MSG_DEFAULT);
 }
 
 
@@ -172,7 +176,7 @@ This will not print to rcon
 A raw string should NEVER be passed as fmt, because of "%f" type crashers.
 =============
 */
-void QDECL Com_PrintNoRedirect( const char *fmt, ... ) {
+void QDECL Com_PrintNoRedirect( conChannel_t channel, const char *fmt, ... ) {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
 
@@ -180,7 +184,7 @@ void QDECL Com_PrintNoRedirect( const char *fmt, ... ) {
 	Q_vsnprintf (msg, sizeof(msg), fmt, argptr);
 	va_end (argptr);
 
-        Com_PrintMessage( 0, msg, MSG_NORDPRINT);
+        Com_PrintMessage( channel, msg, MSG_NORDPRINT);
 }
 
 
@@ -194,17 +198,17 @@ to the apropriate place.
 A raw string should NEVER be passed as fmt, because of "%f" type crashers.
 =============
 */
-void QDECL Com_PrintWarning( const char *fmt, ... ) {
+void QDECL Com_PrintWarning( conChannel_t channel, const char *fmt, ... ) {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
 
-	memcpy(msg,"^3Warning: ", sizeof(msg));
+	memcpy(msg,"^3Warning: ", 12);
 
 	va_start (argptr,fmt);
 	Q_vsnprintf (&msg[11], (sizeof(msg)-12), fmt, argptr);
 	va_end (argptr);
 
-        Com_PrintMessage( 0, msg, MSG_WARNING);
+        Com_PrintMessage( channel, msg, MSG_WARNING);
 }
 
 
@@ -218,17 +222,17 @@ to the apropriate place.
 A raw string should NEVER be passed as fmt, because of "%f" type crashers.
 =============
 */
-void QDECL Com_PrintWarningNoRedirect( const char *fmt, ... ) {
+void QDECL Com_PrintWarningNoRedirect( conChannel_t channel, const char *fmt, ... ) {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
 
-	memcpy(msg,"^3Warning: ", sizeof(msg));
+	memcpy(msg,"^3Warning: ", 12);
 
 	va_start (argptr,fmt);
 	Q_vsnprintf (&msg[11], (sizeof(msg)-12), fmt, argptr);
 	va_end (argptr);
 
-        Com_PrintMessage( 0, msg, MSG_NORDPRINT);
+        Com_PrintMessage( channel, msg, MSG_NORDPRINT);
 }
 
 
@@ -242,17 +246,17 @@ to the apropriate place.
 A raw string should NEVER be passed as fmt, because of "%f" type crashers.
 =============
 */
-void QDECL Com_PrintError( const char *fmt, ... ) {
+void QDECL Com_PrintError( conChannel_t channel, const char *fmt, ... ) {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
 
-	memcpy(msg,"^1Error: ", sizeof(msg));
+	memcpy(msg,"^1Error: ", 10);
 
 	va_start (argptr,fmt);
 	Q_vsnprintf (&msg[9], (sizeof(msg)-10), fmt, argptr);
 	va_end (argptr);
 
-        Com_PrintMessage( 0, msg, MSG_ERROR);
+        Com_PrintMessage( channel, msg, MSG_ERROR);
 }
 
 /*
@@ -262,7 +266,7 @@ Com_DPrintf
 A Com_Printf that only shows up if the "developer" cvar is set
 ================
 */
-void QDECL Com_DPrintf( const char *fmt, ...) {
+void QDECL Com_DPrintf( conChannel_t channel, const char *fmt, ...) {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
 		
@@ -277,27 +281,10 @@ void QDECL Com_DPrintf( const char *fmt, ...) {
 	Q_vsnprintf (&msg[2], (sizeof(msg)-3), fmt, argptr);
 	va_end (argptr);
 
-        Com_PrintMessage( 0, msg, MSG_DEFAULT);
+        Com_PrintMessage( channel, msg, MSG_DEFAULT);
 }
 
 
-void QDECL Com_DPrintfWrapper( int drop, const char *fmt, ...) {
-	va_list		argptr;
-	char		msg[MAXPRINTMSG];
-		
-	if ( !Com_IsDeveloper() ) {
-		return;			// don't confuse non-developers with techie stuff...
-	}
-	
-	msg[0] = '^';
-	msg[1] = '2';
-
-	va_start (argptr,fmt);	
-	Q_vsnprintf (&msg[2], (sizeof(msg)-3), fmt, argptr);
-	va_end (argptr);
-
-        Com_PrintMessage( 0, msg, MSG_DEFAULT);
-}
 
 /*
 ================
@@ -307,7 +294,7 @@ A Com_Printf that only shows up if the "developer" cvar is set
 This will not print to rcon
 ================
 */
-void QDECL Com_DPrintNoRedirect( const char *fmt, ... ) {
+void QDECL Com_DPrintNoRedirect( conChannel_t channel, const char *fmt, ... ) {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
 
@@ -322,7 +309,7 @@ void QDECL Com_DPrintNoRedirect( const char *fmt, ... ) {
 	Q_vsnprintf (&msg[2], (sizeof(msg)-3), fmt, argptr);
 	va_end (argptr);
 
-        Com_PrintMessage( 0, msg, MSG_NORDPRINT);
+        Com_PrintMessage( channel, msg, MSG_NORDPRINT);
 }
 
 void QDECL Com_PrintScriptRuntimeWarning(const char *fmt, ...)
@@ -338,7 +325,7 @@ void QDECL Com_PrintScriptRuntimeWarning(const char *fmt, ...)
 
 	Com_sprintf(finalmsg, sizeof(finalmsg), "^6Script Runtime Warning: %s\n", msg);
 
-        Com_PrintMessage( 0, finalmsg, MSG_WARNING);
+        Com_PrintMessage( CON_CHANNEL_SCRIPT, finalmsg, MSG_WARNING);
 }
 
 
@@ -385,3 +372,4 @@ void Com_AddRedirect(void (*rd_dest)(const char *, int))
     }
     Com_Error(ERR_FATAL, "Com_AddRedirect: Out of redirect handles. Increase MAX_REDIRECTDESTINATIONS to add more redirect destinations");
 }
+

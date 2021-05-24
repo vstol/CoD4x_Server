@@ -26,7 +26,6 @@
 #include "../sys_main.h"
 #include "../sys_cod4defs.h"
 #include "sys_win32.h"
-#include "../sys_thread.h"
 
 #include <windows.h>
 #include <wincrypt.h>
@@ -39,6 +38,7 @@
 #include <Shlobj.h>
 
 void Sys_ShowErrorDialog(const char* functionName);
+void Sys_InitThreadContext();
 
 WinVars_t g_wv;
 
@@ -131,7 +131,7 @@ void Sys_StartProcess( char *cmdline, qboolean doexit ) {
 			{
 				Com_Error( ERR_DROP, "Could not start process: '%s' ", cmdline );
 			}else{
-				Com_PrintError("Could not start process: '%s'\n", cmdline);
+				Com_PrintError(CON_CHANNEL_SYSTEM,"Could not start process: '%s'\n", cmdline);
 			}
 			return;
 		}
@@ -480,7 +480,7 @@ qboolean Sys_DirectoryHasContent(const char *dir)
 	{
 		searchpath[strlen(searchpath) -1] = '\0';
 	}
-	Q_strcat(searchpath, sizeof(searchpath), "\\*");
+	Q_strncat(searchpath, sizeof(searchpath), "\\*");
 
     if((hFind = FindFirstFile(searchpath, &fdFile)) == INVALID_HANDLE_VALUE)
     {
@@ -561,16 +561,17 @@ const char *Sys_Dirname(const char *path)
     slash1 = strrchr(dir, '/');
     slash2 = strrchr(dir, '\\');
 
-    if (slash1 && slash2)
+    if (slash1 && slash2){
         max = slash1 < slash2 ? slash2 : slash1;
-    else if (slash1 && !slash2)
+    }else if (slash1 && !slash2){
         max = slash1;
-    else if (!slash1 && slash2)
+    }else if (!slash1 && slash2){
         max = slash2;
-        
-    if (max)
+    }
+    if (max){
         *max = '\0';
-	return va("%s", dir);
+    }
+    return va("%s", dir);
 }
 /*
 ==============
@@ -671,26 +672,20 @@ void Sys_CloseLibrary(void* hModule)
 	FreeLibrary(hModule);
 }
 
-static CRITICAL_SECTION crit_sections[CRIT_SIZE];
+static CRITICAL_SECTION crit_sections[CRITSECT_COUNT];
 threadid_t mainthread;
+DWORD tlsKey;
 
 
 void Sys_InitializeCriticalSections( void )
 {
 	int i;
 
-	for (i = 0; i < CRIT_SIZE; i++) {
+	for (i = 0; i < CRITSECT_COUNT; i++) {
 		InitializeCriticalSection( &crit_sections[i] );
 
 	}
 
-}
-
-void __cdecl Sys_ThreadMain( void )
-{
-	mainthread = GetCurrentThreadId();
-
-    Com_InitThreadData();
 }
 
 
@@ -704,8 +699,15 @@ void __cdecl Sys_LeaveCriticalSectionInternal(int section)
 	LeaveCriticalSection(&crit_sections[section]);
 }
 
+HANDLE Sys_GetThreadHandleFromID(threadid_t tid)
+{
+    return OpenThread(0, 0, tid);
+}
 
-qboolean Sys_CreateNewThread(void* (*ThreadMain)(void*), threadid_t *tid, void* arg)
+
+
+
+HANDLE Sys_CreateThreadWithHandle(void* (*ThreadMain)(void*), threadid_t *tid, void* arg)
 {
 	char errMessageBuf[512];
 	DWORD lastError;
@@ -725,16 +727,29 @@ qboolean Sys_CreateNewThread(void* (*ThreadMain)(void*), threadid_t *tid, void* 
 		if(lastError != 0)
 		{
 			FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, lastError, MAKELANGID(LANG_NEUTRAL,SUBLANG_DEFAULT), (LPSTR)errMessageBuf, sizeof(errMessageBuf) -1, NULL);
-			Com_PrintError("Failed to start thread with error: %s\n", errMessageBuf);
+			Com_PrintError(CON_CHANNEL_SYSTEM,"Failed to start thread with error: %s\n", errMessageBuf);
 
 		}else{
-			Com_PrintError("Failed to start thread!\n");
+			Com_PrintError(CON_CHANNEL_SYSTEM,"Failed to start thread!\n");
 		}
+		return NULL;
+	}
+	return thid;
+}
+
+qboolean Sys_CreateNewThread(void* (*ThreadMain)(void*), threadid_t *tid, void* arg)
+{
+	HANDLE thid = Sys_CreateThreadWithHandle(ThreadMain, tid, arg);
+
+	if(thid == NULL)
+	{
 		return qfalse;
 	}
+
 	CloseHandle(thid);
 	return qtrue;
 }
+
 
 
 qboolean __cdecl Sys_IsMainThread( void )
@@ -761,17 +776,6 @@ threadid_t __cdecl Sys_GetCurrentThreadId( void )
 		return GetCurrentThreadId();
 }
 
-
-/*
-==================
-Sys_Backtrace
-==================
-*/
-
-int Sys_Backtrace(void** buffer, int size)
-{
-    return 0;
-}
 
 char** GetStrTable(void* filebuf, int len, sharedlib_data_t *text)
 {
@@ -873,6 +877,7 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	if(copylen >= (sizeof(lpFilename) -1))
 	{
 		Sys_SetExeFile( "" );
+		Sys_SetExeFileShort( "" );
 		Sys_SetBinaryPath( "" );
 		MessageBoxA(NULL, "Path is too long. The whole path to location of this .exe file must not exceed 254 characters", CLIENT_WINDOW_TITLE " Error", MB_OK | MB_ICONERROR);
 		return 1;
@@ -889,17 +894,18 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 				return 1;
 			}
 			Sys_SetBinaryPath( lpFilename );
+			Sys_SetExeFileShort( lastSep +1 );
 		}else{
 			MessageBoxA(NULL, "GetModuleFileName() returned an unexpected filepath.", CLIENT_WINDOW_TITLE " Error", MB_OK | MB_ICONERROR);
 			return 1;
 		}
 	}
-
+	Sys_InitThreadContext();
     return Sys_Main(sys_cmdline);
 }
 
 
-void  __attribute__ ((noreturn)) Sys_ExitForOS( int exitCode )
+void  __noreturn Sys_ExitForOS( int exitCode )
 {
 	ExitProcess( exitCode );
 }
@@ -913,3 +919,119 @@ void Sys_SleepUSec(int usec)
 {
 	Sleep((usec + 999) / 1000);
 }
+
+unsigned int Sys_GetProcessAffinityMask()
+{
+  long unsigned int systemAffinityMask;
+  long unsigned int processAffinityMask = 0;
+
+  HANDLE h = GetCurrentProcess();
+
+  GetProcessAffinityMask(h, &processAffinityMask, &systemAffinityMask);
+  return processAffinityMask;
+}
+
+DWORD __cdecl Sys_InterlockedExchangeAdd(DWORD volatile *Addend, DWORD value)
+{
+	return InterlockedExchangeAdd((LONG volatile *)Addend, value);
+}
+
+DWORD __cdecl Sys_InterlockedDecrement(DWORD volatile *Addend)
+{
+	return InterlockedDecrement((LONG volatile *)Addend);
+}
+DWORD __cdecl Sys_InterlockedIncrement(DWORD volatile *Addend)
+{
+	return InterlockedIncrement((LONG volatile *)Addend);
+}
+DWORD __cdecl Sys_InterlockedCompareExchange(DWORD volatile *Destination, DWORD Exchange, DWORD Comparand)
+{
+	return InterlockedCompareExchange((LONG volatile *)Destination, Exchange, Comparand);
+}
+
+int __cdecl __cxa_atexit(void (__cdecl *func) (void*), void *arg, void *dso_handle)
+{
+	return atexit((void(__cdecl*)(void))func);
+}
+
+void Sys_InitThreadContext()
+{
+	tlsKey = TlsAlloc();
+    mainthread = Sys_GetCurrentThreadId( );
+}
+
+void Sys_SetThreadLocalStorage(void** localvar)
+{
+    if(TlsSetValue(tlsKey, localvar) == FALSE)
+	{
+		Sys_ShowErrorDialog("Sys_SetThreadLocalStorage");
+		ExitProcess(-1);
+	}
+}
+
+void** Sys_GetThreadLocalStorage()
+{
+    return TlsGetValue(tlsKey);
+}
+
+#ifdef __GNUC__
+ 
+
+struct tagTHREADNAME_INFO
+{
+    DWORD dwType; // must be 0x1000
+    LPCSTR szName; // pointer to name (in user addr space)
+    DWORD dwThreadID; // thread ID (-1=caller thread)
+    DWORD dwFlags; // reserved for future use, must be zero
+};
+
+#endif
+
+void Sys_SetThreadName(threadid_t tid, const char* szThreadName)
+{
+	return;
+  struct tagTHREADNAME_INFO info;
+
+  info.dwType = 4096;
+  info.szName = szThreadName;
+  info.dwThreadID = tid;
+  info.dwFlags = 0;
+  RaiseException(0x406D1388u, 0, 4u, &info.dwType);
+}
+
+HANDLE __cdecl Sys_CreateEvent(qboolean bManualReset, qboolean bInitialState, const char *name)
+{
+	SECURITY_ATTRIBUTES sa;
+	sa.nLength = sizeof(sa);
+	sa.lpSecurityDescriptor = NULL;
+	sa.bInheritHandle = false;
+	
+	return CreateEventA(&sa, bManualReset, bInitialState, NULL); //Name must be NULL or it will interact with other processes
+}
+
+signed int __cdecl Sys_ResetEvent(HANDLE hEvent)
+{
+	return ResetEvent(hEvent);
+}
+
+signed int __cdecl Sys_SetEvent(HANDLE hEvent)
+{
+	return SetEvent(hEvent);
+}
+
+signed int __cdecl Sys_WaitForObject(HANDLE hHandle)
+{
+	return WaitForSingleObject(hHandle, -1);
+}
+
+signed int __cdecl Sys_IsObjectSignaled(HANDLE hHandle)
+{
+	if(WaitForSingleObject(hHandle, 0) == 0)
+	{
+		return 1;
+	}
+	return 0;
+}
+
+void Sys_PrintBacktrace()
+{}

@@ -1,3 +1,9 @@
+
+
+#if 0
+
+T-Max has to fix it. Or better make it a standalone program
+
 /* Stdlib includes: */
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,11 +19,12 @@
 #include "../sys_main.h"
 #include "../filesystem.h"
 #include "../qcommon.h"
+#include "../xassets.h"
 /* Assets includes: */
 #include "rawfile.h"
-#include "localized_string.h"
+#include "localized.h"
 #include "stringtable.h"
-#include "menufile.h"
+#include "menulist.h"
 #include "menu.h"
 
 #define MAX_STORE_FASTFILES (32)
@@ -54,6 +61,7 @@ typedef struct ZoneDataBlock_t
     uint size;
 } ZoneDataBlock_t;
 
+/* This struct is the T-Max version of DB_LoadData */
 typedef struct FastFileZlibHandler_t
 {
     FILE *fd;
@@ -74,9 +82,11 @@ typedef struct ExtractorAssetHandler_t
     extract_routine_t handler;
 } ExtractorAssetHandler_t;
 
+/*
 #define g_pFFContents (*(FastFileContents_t **)0x1411F540)
-#define g_ff (*(FastFileZlibHandler_t *)0x1411EF60)
-const char *(*DB_XAssetGetName)(AssetHandler_t* handler) = ((const char*(*)(AssetHandler_t*))0x081DA7F2);
+*/
+extern FastFileZlibHandler_t g_load;
+
 
 static void extract_rawfile(const void *header);
 static void extract_menufile(const void *header);
@@ -115,9 +125,9 @@ static const ExtractorAssetHandler_t g_ExtractorRoutines[33] = {
     {17, 0, 0},
     {18, 0, 0},
     {19, 0, 0},
-    {XASSET_TYPE_MENUFILE, "menufile", (extract_routine_t)extract_menufile},
+    {ASSET_TYPE_MENULIST, "menufile", (extract_routine_t)extract_menufile},
     {21, 0},
-    {XASSET_TYPE_LOCALIZEDSTRING, "localizedstring", (extract_routine_t)extract_localized_string},
+    {ASSET_TYPE_LOCALIZE_ENTRY, "localizedstring", (extract_routine_t)extract_localized_string},
     {23, 0},
     {24, 0},
     {25, 0},
@@ -126,8 +136,8 @@ static const ExtractorAssetHandler_t g_ExtractorRoutines[33] = {
     {28, 0},
     {29, 0},
     {30, 0},
-    {XASSET_TYPE_RAWFILE, "rawfile", (extract_routine_t)extract_rawfile},
-    {XASSET_TYPE_STRINGTABLE, "stringtable", (extract_routine_t)extract_stringtable}
+    {ASSET_TYPE_RAWFILE, "rawfile", (extract_routine_t)extract_rawfile},
+    {ASSET_TYPE_STRINGTABLE, "stringtable", (extract_routine_t)extract_stringtable}
 };
 
 /* Setups output path. */
@@ -149,18 +159,18 @@ void store_fastfile_contents_information()
 
     /* Do not add maps to this list as they can be unloaded 
        and unloading not covered by this code. */
-    if (!strncmp(g_ff.name, "mp_", 3))
+    if (!strncmp(g_load.name, "mp_", 3))
         return;
 
     for (i = 0; i < MAX_STORE_FASTFILES; ++i)
     {
         info = &g_FastFileAssetsTableInfo[i];
-        if (!strcmp(info->name, g_ff.name) || !info->name[0])
+        if (!strcmp(info->name, g_load.name) || !info->name[0])
             break;
     }
     /* 'info' points to old fastfile or to place for new one. */
     Com_Memset(info, 0, sizeof(FastFileAssetsTableInfo_t));
-    strcpy(info->name, g_ff.name);
+    strcpy(info->name, g_load.name);
     Com_Memcpy(&info->content, g_pFFContents, sizeof(FastFileContents_t));
 }
 
@@ -174,7 +184,7 @@ static void add_zone_source_line(const char *asset_type, const char *asset_name)
     zone_source = FS_SV_FOpenFileAppend(zone_source_path);
     if (!zone_source)
     {
-        Com_Printf("Can't save to zone source file '%s'.\n", zone_source_path);
+        Com_Printf(CON_CHANNEL_FILES,"Can't save to zone source file '%s'.\n", zone_source_path);
         return;
     }
     
@@ -186,13 +196,13 @@ static void add_zone_source_line(const char *asset_type, const char *asset_name)
 static void extract_rawfile(const void *header)
 {
     char output_path[MAX_OSPATH];
-    Rawfile_t *asset = (Rawfile_t *)header;
+    struct RawFile *asset = (struct RawFile *)header;
     fileHandle_t f;
 
     /* Do not extract with same name as .ff. */
     if (!strcmp(asset->name, g_zone_name))
     {
-        Com_Printf("ignored...");
+        Com_Printf(CON_CHANNEL_FILES,"ignored...");
         return;
     }
 
@@ -201,11 +211,11 @@ static void extract_rawfile(const void *header)
     f = FS_SV_FOpenFileWrite(output_path);
     if (!f)
     {
-        Com_Printf("Can't open '%s': %s\n", output_path, strerror(errno));
+        Com_Printf(CON_CHANNEL_FILES,"Can't open '%s': %s\n", output_path, strerror(errno));
         return;
     }
     WRITE_EXTRACTOR_HEADER(f);
-    FS_Write(asset->data, asset->data_size, f);
+    FS_Write(asset->buffer, asset->len, f);
     FS_FCloseFile(f);
     add_zone_source_line("rawfile", asset->name);
 }
@@ -214,7 +224,7 @@ static void store_localized_string_file(const char *file_name)
 {
     if (g_LocalizedStringFilesCount == MAX_LOCSTRING_FILES)
     {
-        Com_Printf("g_LocalizedStringFilesCount overflow. Increase MAX_LOCSTRING_FILES " \
+        Com_Printf(CON_CHANNEL_FILES,"g_LocalizedStringFilesCount overflow. Increase MAX_LOCSTRING_FILES " \
                    "if you want to store more than %d localized string files.\n", MAX_LOCSTRING_FILES);
         return;
     }
@@ -269,7 +279,7 @@ static void replace_escape_characters(const char *in, char *out, uint out_size)
     *ptr_out = '\0';
     /* Oops, something has been left untouched. Need to increase buffer. */
     if (*ptr_in)
-        Com_Printf("Out buffer overflow. Increase size by %d bytes to get all data parsed...", strlen(ptr_in));
+        Com_Printf(CON_CHANNEL_FILES,"Out buffer overflow. Increase size by %d bytes to get all data parsed...", strlen(ptr_in));
 }
 
 /* Extract localized string. */
@@ -286,7 +296,7 @@ static void extract_localized_string(const void *header)
     prefix_end = strchr(asset->key, '_');
     if (prefix_end - asset->key + 1 > sizeof(prefix))
     {
-        Com_Printf("Too long prefix for localized string '%s'. Increase prefix size (now %d).\n", asset->key, sizeof(prefix));
+        Com_Printf(CON_CHANNEL_FILES,"Too long prefix for localized string '%s'. Increase prefix size (now %d).\n", asset->key, sizeof(prefix));
         return;
     }
     strncpy(prefix, asset->key, prefix_end - asset->key);
@@ -299,7 +309,7 @@ static void extract_localized_string(const void *header)
         f = FS_SV_FOpenFileWrite(output_path);
         if (!f)
         {
-            Com_Printf("Can't open '%s'.\n", output_path);
+            Com_Printf(CON_CHANNEL_FILES,"Can't open '%s'.\n", output_path);
             return;
         }
         WRITE_EXTRACTOR_HEADER(f);
@@ -334,7 +344,7 @@ static void extract_stringtable(const void *header)
     f = FS_SV_FOpenFileWrite(output_path);
     if (!f)
     {
-        Com_Printf("Can't open '%s'.\n", output_path);
+        Com_Printf(CON_CHANNEL_FILES,"Can't open '%s'.\n", output_path);
         return;
     }
     /* Write out string table. */
@@ -403,7 +413,7 @@ static const char *generate_expression_string(const Statement_t *s)
     }
     /* Should not be negative, but show warning. */
     if (parensCount < 0)
-        Com_Printf("Warning: more right parens than left parens.\n");
+        Com_Printf(CON_CHANNEL_FILES,"Warning: more right parens than left parens.\n");
     else
     {
         /* Write missing right parens. */
@@ -433,7 +443,7 @@ static const char *action_optimize(const char *action)
     /* Check for buffer overflow. */
     if (strlen(action) >= ACTION_OPTIMIZER_BUFFER_SIZE)
     {
-        Com_Printf("Buffer overflow detected (%d bytes). Increase ACTION_OPTIMIZER_BUFFER_SIZE.", strlen(action));
+        Com_Printf(CON_CHANNEL_FILES,"Buffer overflow detected (%d bytes). Increase ACTION_OPTIMIZER_BUFFER_SIZE.", strlen(action));
         return action;
     }
 
@@ -950,7 +960,7 @@ static void extract_menu_item(fileHandle_t f, const ItemDef_t *i)
 static void extract_menu(fileHandle_t f, MenuDef_t *asset)
 {
     int i;
-    Com_Printf("    Writing menu '%s'...", asset->window.name);
+    Com_Printf(CON_CHANNEL_FILES,"    Writing menu '%s'...", asset->window.name);
 
     /* Write menudef header. */
     FS_Write("    menuDef\n    {\n", 18, f);
@@ -969,7 +979,7 @@ static void extract_menu(fileHandle_t f, MenuDef_t *asset)
     /* Write menudef footer. */
     FS_Write("    }\n", 6, f);
 
-    Com_Printf("done.\n");
+    Com_Printf(CON_CHANNEL_FILES,"done.\n");
 }
 
 /* Extract menufile. */
@@ -985,14 +995,14 @@ static void extract_menufile(const void *header)
 
     strcpy(subpath, Sys_Dirname(asset->name));
     /* Newline for each menu. */
-    Com_Printf("\n");
+    Com_Printf(CON_CHANNEL_FILES,"\n");
     if (!strstr(asset->name, ".txt"))
     {
         snprintf(output_path, MAX_OSPATH, "%s%s/raw/%s", g_savePath, g_zone_name, asset->name);
         f = FS_SV_FOpenFileWrite(output_path);
         if (!f)
         {
-            Com_Printf("Can't open '%s'.\n", output_path);
+            Com_Printf(CON_CHANNEL_FILES,"Can't open '%s'.\n", output_path);
             return;
         }
          /* Write .menu file header. */
@@ -1014,7 +1024,7 @@ static void extract_menufile(const void *header)
         text_menufile = FS_SV_FOpenFileWrite(text_asset_name);
         if (!text_menufile)
         {
-            Com_Printf("Can't open '%s'.\n", text_asset_name);
+            Com_Printf(CON_CHANNEL_FILES,"Can't open '%s'.\n", text_asset_name);
             return;
         }
         /* Write header to .txt file. */
@@ -1028,7 +1038,7 @@ static void extract_menufile(const void *header)
             f = FS_SV_FOpenFileWrite(output_path);
             if (!f)
             {
-                Com_Printf("Can't open '%s'.\n", output_path);
+                Com_Printf(CON_CHANNEL_FILES,"Can't open '%s'.\n", output_path);
                 return;
             }
             /* Write .menu file header. */
@@ -1057,9 +1067,9 @@ static void extract_from_fastfile(const FastFileAssetsTableInfo_t *ff_info, cons
     {
         if (ff_info->content.asset_list_data[i].type == type)
         {
-            Com_Printf("Extracting '%s'...", DB_XAssetGetName(&ff_info->content.asset_list_data[i]));
+            Com_Printf(CON_CHANNEL_FILES,"Extracting '%s'...", DB_XAssetGetName(&ff_info->content.asset_list_data[i]));
             handler(ff_info->content.asset_list_data[i].header);
-            Com_Printf("done.\n");
+            Com_Printf(CON_CHANNEL_FILES,"done.\n");
         }
     }
     /* Post-extraction actions. */
@@ -1080,16 +1090,16 @@ void Cmd_ExtractAsset()
     if (Cmd_Argc() != 3)
     {
     USAGE:
-        Com_Printf("Usage:\n");
-        Com_Printf("Server must be running in order to extract assets.\n");
-        Com_Printf("  %s <ff> <type>\n", Cmd_Argv(0));
-        Com_Printf("    ff - Name of fastfile to look into, without extension.\n");
-        Com_Printf("    type - Type of asset. Must be one of:\n");
-        Com_Printf("           all\n");
+        Com_Printf(CON_CHANNEL_FILES,"Usage:\n");
+        Com_Printf(CON_CHANNEL_FILES,"Server must be running in order to extract assets.\n");
+        Com_Printf(CON_CHANNEL_FILES,"  %s <ff> <type>\n", Cmd_Argv(0));
+        Com_Printf(CON_CHANNEL_FILES,"    ff - Name of fastfile to look into, without extension.\n");
+        Com_Printf(CON_CHANNEL_FILES,"    type - Type of asset. Must be one of:\n");
+        Com_Printf(CON_CHANNEL_FILES,"           all\n");
         for (i = 0; i < 33; ++i)
         {
             if (g_ExtractorRoutines[i].handler)
-                Com_Printf("           %s\n", g_ExtractorRoutines[i].name);
+                Com_Printf(CON_CHANNEL_FILES,"           %s\n", g_ExtractorRoutines[i].name);
         }
         return;
     }
@@ -1108,7 +1118,7 @@ void Cmd_ExtractAsset()
     }
     if (!ff_info)
     {
-        Com_Printf("Fastfile with name '%s' not loaded.\n", g_zone_name);
+        Com_Printf(CON_CHANNEL_FILES,"Fastfile with name '%s' not loaded.\n", g_zone_name);
         return;
     }
 
@@ -1117,14 +1127,14 @@ void Cmd_ExtractAsset()
     /* First check if all assets requested. */
     if (!strcmp(type, "all"))
     {
-        Com_Printf("Output directory: '%s%s/'\n", g_savePath, g_zone_name);
+        Com_Printf(CON_CHANNEL_FILES,"Output directory: '%s%s/'\n", g_savePath, g_zone_name);
         /* Do all assets. */
         for (i = 0; i < 33; ++i)
         {
             /* Extract only if handler routine available. */
             if (g_ExtractorRoutines[i].handler)
             {
-                Com_Printf("\nExtracting assets of type '%s' from fastfile '%s':\n", g_ExtractorRoutines[i].name, g_zone_name);
+                Com_Printf(CON_CHANNEL_FILES,"\nExtracting assets of type '%s' from fastfile '%s':\n", g_ExtractorRoutines[i].name, g_zone_name);
                 extract_from_fastfile(ff_info, g_ExtractorRoutines[i].type, g_ExtractorRoutines[i].handler);
             }
         }
@@ -1144,12 +1154,12 @@ void Cmd_ExtractAsset()
     
     if (!handler || type_num == -1)
     {
-        Com_Printf("Unknown asset type '%s'.\n", type);
+        Com_Printf(CON_CHANNEL_FILES,"Unknown asset type '%s'.\n", type);
         goto USAGE;
     }
     /* Do one asset. */
-    Com_Printf("Output directory: './%s%s/'\n", g_savePath, g_zone_name);
-    Com_Printf("Extracting assets of type '%s' from fastfile '%s':\n", type, g_zone_name);    
+    Com_Printf(CON_CHANNEL_FILES,"Output directory: './%s%s/'\n", g_savePath, g_zone_name);
+    Com_Printf(CON_CHANNEL_FILES,"Extracting assets of type '%s' from fastfile '%s':\n", type, g_zone_name);    
     extract_from_fastfile(ff_info, type_num, handler);
     g_zone_name = 0;
 }
@@ -1165,10 +1175,10 @@ void Cmd_ListAssets()
 
     if (Cmd_Argc() != 2)
     {
-        Com_Printf("List contents of fastfile.\n");
-        Com_Printf("Map fastfiles are ignored for now.\n");
-        Com_Printf("Usage:\n");
-        Com_Printf("  %s <fastfile_name>\n", Cmd_Argv(0));
+        Com_Printf(CON_CHANNEL_FILES,"List contents of fastfile.\n");
+        Com_Printf(CON_CHANNEL_FILES,"Map fastfiles are ignored for now.\n");
+        Com_Printf(CON_CHANNEL_FILES,"Usage:\n");
+        Com_Printf(CON_CHANNEL_FILES,"  %s <fastfile_name>\n", Cmd_Argv(0));
         return;
     }
 
@@ -1180,18 +1190,18 @@ void Cmd_ListAssets()
     }
     if (!ff_contents)
     {
-        Com_Printf("Fastfile with name '%s' not loaded.\n", ff);
+        Com_Printf(CON_CHANNEL_FILES,"Fastfile with name '%s' not loaded.\n", ff);
         return;
     }
 
     for (i = 0; i < ff_contents->asset_list_count; ++i)
         ++assets[ff_contents->asset_list_data[i].type];
 
-    Com_Printf("Contents of fastfile '%s':\n", ff);
+    Com_Printf(CON_CHANNEL_FILES,"Contents of fastfile '%s':\n", ff);
     for (i = 0; i < 33; ++i)
     {
         if (assets[i])
-            Com_Printf("Assets count for type '%s': %d\n", g_AssetNames[i], assets[i]);
+            Com_Printf(CON_CHANNEL_FILES,"Assets count for type '%s': %d\n", g_AssetNames[i], assets[i]);
     }
 }
 
@@ -1229,3 +1239,11 @@ void add_extractor_console_commands()
 #undef WRITE_ITEMDEF_FIELD_FLOAT
 #undef WRITE_ITEMDEF_FIELD_INT
 #undef WRITE_EXTRACTOR_HEADER
+
+#else
+
+void extractor_init(){}
+void add_extractor_console_commands(){}
+
+
+#endif

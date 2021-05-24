@@ -35,7 +35,7 @@ If you have questions concerning this license or the applicable additional terms
  *
  *****************************************************************************/
 
-#include "../q_shared.h"
+#include "game_inc.h"
 #include "l_utils.h"
 #include "l_memory.h"
 #include "l_log.h"
@@ -124,7 +124,7 @@ void AAS_RoutingInfo( void ) {
 // Returns:				-
 // Changes Globals:		-
 //===========================================================================
-__inline int AAS_ClusterAreaNum( int cluster, int areanum ) {
+int AAS_ClusterAreaNum( int cluster, int areanum ) {
 	int side, areacluster;
 
 	areacluster = ( *aasworld ).areasettings[areanum].cluster;
@@ -195,7 +195,7 @@ int AAS_TravelFlagForType( int traveltype ) {
 // Returns:					-
 // Changes Globals:		-
 //===========================================================================
-__inline float AAS_RoutingTime( void ) {
+float AAS_RoutingTime( void ) {
 	return AAS_Time();
 } //end of the function AAS_RoutingTime
 //===========================================================================

@@ -50,6 +50,7 @@ typedef struct
 	int time;
 	int nextacktime;
 	int qport;
+	int ping;
 }netreliablemsg_t;
 
 void ReliableMessagesFrame(netreliablemsg_t *chan, int msec);
@@ -60,3 +61,5 @@ int ReliableMessageSend(netreliablemsg_t *chan, byte* indata, int len);
 netreliablemsg_t* ReliableMessageSetup(int netsrc, int qport, netadr_t* remote);
 void Net_TestingFunction(netreliablemsg_t *chan);
 void ReliableMessageDisconnect(netreliablemsg_t *chan);
+int ReliableMessageGetSendBufferSize(netreliablemsg_t *chan);
+int ReliableMessageGetDataSendWindowSize(netreliablemsg_t *chan);

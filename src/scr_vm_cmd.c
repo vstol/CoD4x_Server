@@ -30,7 +30,7 @@
 #include <string.h>
 
 scr_function_t *scr_functions = NULL;
-scr_function_t *scr_methods = NULL;
+scr_method_t *scr_methods = NULL;
 
 /*
 ============
@@ -46,14 +46,14 @@ qboolean Scr_AddFunction( const char *cmd_name, xfunction_t function, qboolean d
 		if ( !strcmp( cmd_name, cmd->name )) {
 			// allow completion-only commands to be silently doubled
 			if ( function != NULL ) {
-				Com_PrintWarning("Scr_AddFunction: %s already defined\n", cmd_name);
+				Com_PrintWarning(CON_CHANNEL_SCRIPT,"Scr_AddFunction: %s already defined\n", cmd_name);
 			}
 			return qfalse;
 		}
 	}
 
 	// use a small malloc to avoid zone fragmentation
-	cmd = Z_Malloc( sizeof( scr_function_t ) + strlen(cmd_name) + 1);
+	cmd = S_Malloc( sizeof( scr_function_t ) + strlen(cmd_name) + 1);
 	strcpy((char*)(cmd +1), cmd_name);
 	cmd->name = (char*)(cmd +1);
 	cmd->function = function;
@@ -140,26 +140,26 @@ __cdecl void* Scr_GetFunction( const char** v_functionName, qboolean* v_develope
 Scr_AddMethod
 ============
 */
-qboolean Scr_AddMethod( const char *cmd_name, xfunction_t function, qboolean developer) {
+qboolean Scr_AddMethod( const char *cmd_name, xmethod_t method, qboolean developer) {
 
-	scr_function_t  *cmd;
+	scr_method_t  *cmd;
 
 	// fail if the command already exists
 	for ( cmd = scr_methods ; cmd ; cmd = cmd->next ) {
 		if ( !strcmp( cmd_name, cmd->name )) {
 			// allow completion-only commands to be silently doubled
-			if ( function != NULL ) {
-				Com_PrintWarning( "Scr_AddMethod: %s already defined\n", cmd_name );
+			if ( method != NULL ) {
+				Com_PrintWarning(CON_CHANNEL_SCRIPT, "Scr_AddMethod: %s already defined\n", cmd_name );
 			}
 			return qfalse;
 		}
 	}
 
 	// use a small malloc to avoid zone fragmentation
-	cmd = Z_Malloc( sizeof( scr_function_t ) + strlen(cmd_name) + 1);
+	cmd = S_Malloc( sizeof( scr_function_t ) + strlen(cmd_name) + 1);
 	strcpy((char*)(cmd +1), cmd_name);
 	cmd->name = (char*)(cmd +1);
-	cmd->function = function;
+	cmd->function = (xfunction_t)method;
 	cmd->developer = developer;
 	cmd->next = scr_methods;
 	scr_methods = cmd;
@@ -172,7 +172,7 @@ Scr_RemoveMethod
 ============
 */
 qboolean Scr_RemoveMethod( const char *cmd_name ) {
-	scr_function_t  *cmd, **back;
+	scr_method_t  *cmd, **back;
 
 	back = &scr_methods;
 	while ( 1 ) {
@@ -198,7 +198,7 @@ Scr_ClearMethods
 */
 void Scr_ClearMethods(  )
 {
-	scr_function_t  *cmd, **back;
+	scr_method_t  *cmd, **back;
 
 	int i = 0;
 
@@ -223,7 +223,7 @@ Scr_GetMethod
 */
 __cdecl void* Scr_GetMethod( const char** v_functionName, qboolean* v_developer ) {
 
-	scr_function_t  *cmd;
+	scr_method_t  *cmd;
 
 	for(cmd = scr_methods; cmd != NULL; cmd = cmd->next)
 	{
@@ -235,4 +235,20 @@ __cdecl void* Scr_GetMethod( const char** v_functionName, qboolean* v_developer 
 		}
 	}
 	return NULL;
+}
+
+qboolean Scr_IsSyscallDefined(const char *name)
+{
+    scr_method_t *pMethod;
+    scr_function_t *pFunction;
+
+    for (pMethod = scr_methods; pMethod != NULL; pMethod = pMethod->next)
+        if (!Q_stricmp(name, pMethod->name))
+            return qtrue;
+
+    for (pFunction = scr_functions; pFunction != NULL; pFunction = pFunction->next)
+        if (!Q_stricmp(name, pFunction->name))
+            return qtrue;
+
+    return qfalse;
 }

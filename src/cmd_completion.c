@@ -43,6 +43,7 @@ Field_Clear
 */
 void Field_Clear( field_t *edit ) {
 	memset(edit->buffer, 0, MAX_EDIT_LINE);
+	edit->len = 0;
 	edit->cursor = 0;
 	edit->scroll = 0;
 }
@@ -94,7 +95,7 @@ PrintMatches
 */
 static void PrintMatches( const char *s ) {
 	if ( !Q_stricmpn( s, shortestMatch, strlen( shortestMatch ) ) ) {
-		Com_Printf( "    %s\n", s );
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "    %s\n", s );
 	}
 }
 
@@ -110,7 +111,7 @@ static void PrintCvarMatches( const char *s ) {
 
 	if ( !Q_stricmpn( s, shortestMatch, strlen( shortestMatch ) ) ) {
 		Com_TruncateLongString( value, Cvar_VariableStringBuffer( s , c_str, sizeof(c_str)) );
-		Com_Printf( "    %s = \"%s\"\n", s, value );
+		Com_Printf(CON_CHANNEL_DONT_FILTER, "    %s = \"%s\"\n", s, value );
 	}
 }
 
@@ -150,16 +151,18 @@ static qboolean Field_Complete( void )
 	Q_strncpyz( &completionField->buffer[ completionOffset ], shortestMatch,
 		sizeof( completionField->buffer ) - completionOffset );
 
-	completionField->cursor = strlen( completionField->buffer );
+	completionField->len = strlen( completionField->buffer );
+	completionField->cursor = completionField->len;
 
 	if( matchCount == 1 )
 	{
-		Q_strcat( completionField->buffer, sizeof( completionField->buffer ), " " );
+		Q_strncat( completionField->buffer, sizeof( completionField->buffer ), " " );
+		completionField->len++;
 		completionField->cursor++;
 		return qtrue;
 	}
 
-	Com_Printf( "]%s\n", completionField->buffer );
+	Com_Printf(CON_CHANNEL_DONT_FILTER, "]%s\n", completionField->buffer );
 
 	return qfalse;
 }

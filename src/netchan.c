@@ -70,8 +70,6 @@ to the new value before sending out any replies.
 cvar_t      *showpackets;
 cvar_t      *showdrop;
 cvar_t      *qport;
-cvar_t      **msg_dumpEnts = (cvar_t**)(0x8930c1c);
-cvar_t      **msg_printEntityNums = (cvar_t**)(0x8930c18);
 
 static char *netsrcString[2] = {
 	"client",
@@ -91,6 +89,7 @@ void Netchan_Init( int port ) {
 	showdrop = Cvar_RegisterBool( "showdrop", qfalse, CVAR_TEMP, "Show dropped packets");
 	qport = Cvar_RegisterInt( "net_qport", port, 1, 65535, CVAR_INIT, "The net_chan qport" );
 	NET_CookieInit();
+	MSG_RegisterCvars();
 }
 
 /*
@@ -162,13 +161,13 @@ qboolean Netchan_Process( netchan_t *chan, msg_t *msg ) {
 
 	if ( showpackets->boolean ) {
 		if ( fragmented ) {
-			Com_Printf( "%s recv %4i : s=%i fragment=%i,%i\n"
+			Com_Printf(CON_CHANNEL_NETWORK, "%s recv %4i : s=%i fragment=%i,%i\n"
 						, netsrcString[ chan->sock ]
 						, msg->cursize
 						, sequence
 						, fragmentStart, fragmentLength );
 		} else {
-			Com_Printf( "%s recv %4i : s=%i\n"
+			Com_Printf(CON_CHANNEL_NETWORK, "%s recv %4i : s=%i\n"
 						, netsrcString[ chan->sock ]
 						, msg->cursize
 						, sequence );
@@ -180,7 +179,7 @@ qboolean Netchan_Process( netchan_t *chan, msg_t *msg ) {
 	//
 	if ( sequence <= chan->incomingSequence ) {
 		if ( showdrop->boolean || showpackets->boolean ) {
-			Com_Printf( "%s:Out of order packet %i at %i\n"
+			Com_Printf(CON_CHANNEL_NETWORK, "%s:Out of order packet %i at %i\n"
 						, NET_AdrToString( &chan->remoteAddress )
 						,  sequence
 						, chan->incomingSequence );
@@ -194,7 +193,7 @@ qboolean Netchan_Process( netchan_t *chan, msg_t *msg ) {
 	chan->dropped = sequence - ( chan->incomingSequence + 1 );
 	if ( chan->dropped > 0 ) {
 		if ( showdrop->boolean || showpackets->boolean ) {
-			Com_Printf( "%s:Dropped %i packets at %i\n"
+			Com_Printf(CON_CHANNEL_NETWORK, "%s:Dropped %i packets at %i\n"
 						, NET_AdrToString( &chan->remoteAddress )
 						, chan->dropped
 						, sequence );
@@ -221,7 +220,7 @@ qboolean Netchan_Process( netchan_t *chan, msg_t *msg ) {
 		// if we missed a fragment, dump the message
 		if ( fragmentStart != chan->fragmentLength ) {
 			if ( showdrop->boolean || showpackets->boolean ) {
-				Com_Printf( "%s:Dropped a message fragment seq: %d, fragmentStart: %d, chan->fragmentLength: %d\n", NET_AdrToString( &chan->remoteAddress ), sequence, fragmentStart, chan->fragmentLength);
+				Com_Printf(CON_CHANNEL_NETWORK, "%s:Dropped a message fragment seq: %d, fragmentStart: %d, chan->fragmentLength: %d\n", NET_AdrToString( &chan->remoteAddress ), sequence, fragmentStart, chan->fragmentLength);
 			}
 			// we can still keep the part that we have so far,
 			// so we don't need to clear chan->fragmentLength
@@ -233,7 +232,7 @@ qboolean Netchan_Process( netchan_t *chan, msg_t *msg ) {
 		    || chan->fragmentLength + fragmentLength > chan->fragmentBufferSize)
 		{
 			if ( showdrop->boolean || showpackets->boolean ) {
-				Com_Printf( "%s:illegal fragment length: Current %i Fragment length %i Max %i\n",
+				Com_Printf(CON_CHANNEL_NETWORK, "%s:illegal fragment length: Current %i Fragment length %i Max %i\n",
 						NET_AdrToString( &chan->remoteAddress ), chan->fragmentLength,
 						fragmentLength, chan->fragmentBufferSize);
 			}
@@ -250,7 +249,7 @@ qboolean Netchan_Process( netchan_t *chan, msg_t *msg ) {
 		}
 
 		if ( chan->fragmentLength > msg->maxsize ) {
-			Com_Printf( "%s:fragmentLength %i > msg->maxsize\n", NET_AdrToString( &chan->remoteAddress ), chan->fragmentLength );
+			Com_Printf(CON_CHANNEL_NETWORK, "%s:fragmentLength %i > msg->maxsize\n", NET_AdrToString( &chan->remoteAddress ), chan->fragmentLength );
 			return qfalse;
 		}
 
@@ -321,7 +320,7 @@ qboolean Netchan_TransmitNextFragment( netchan_t *chan ) {
 	// send the datagram
 	sendsucc = NET_SendPacket( chan->sock, send.cursize, send.data, &chan->remoteAddress );
 	if ( showpackets->boolean ) {
-		Com_Printf( "%s send %4i : s=%i fragment=%i,%i\n"
+		Com_Printf(CON_CHANNEL_NETWORK, "%s send %4i : s=%i fragment=%i,%i\n"
 					, netsrcString[ chan->sock ]
 					, send.cursize
 					, chan->outgoingSequence
@@ -388,7 +387,7 @@ qboolean Netchan_Transmit( netchan_t *chan, int length, const byte *data ) {
 	// send the datagram
 	sendsucc = NET_SendPacket( chan->sock, send.cursize, send.data, &chan->remoteAddress );
 	if ( showpackets->boolean ) {
-		Com_Printf( "%s send %4i : s=%i ack=%i\n"
+		Com_Printf(CON_CHANNEL_NETWORK, "%s send %4i : s=%i ack=%i\n"
 					, netsrcString[ chan->sock ]
 					, send.cursize
 					, chan->outgoingSequence - 1
@@ -477,8 +476,9 @@ qboolean NET_SendPacket( netsrc_t sock, int length, const void *data, netadr_t *
 	}
 
 	// sequenced packets are shown in netchan, so just show oob
-	if ( showpackets->boolean && *(int *)data == -1 )	{
-		Com_Printf ("send packet %4i\n", length);
+	if ( showpackets->boolean && *(int *)data == -1 ){
+		char string[128];
+		Com_Printf(CON_CHANNEL_NETWORK,"NET_SendPacket %4i destination %s\n", length, NET_AdrToStringMT(to, string, sizeof(string)));
 	}
 	if ( to->type == NA_LOOPBACK ) {
 		NET_SendLoopPacket (sock, length, data, *to);

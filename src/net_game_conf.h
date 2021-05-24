@@ -45,11 +45,7 @@
 
 #define	PORT_SERVER		28960
 
-#define	PROTOCOL_VERSION (unsigned int)(SYS_COMMONVERSION + 0.00001)
-
-#define _STRINGIFY(s) #s
-#define STRINGIFY(s) _STRINGIFY(s)
-#define COD4X_SUBVERSION	STRINGIFY(SYS_COMMONVERSION)
+#define	PROTOCOL_VERSION (unsigned int)(Sys_GetCommonVersion() + 0.00001)
 
 #define	LEGACY_PROTOCOL_VERSION	6
 
@@ -72,7 +68,8 @@ enum svc_ops_e {
 	svc_steamcommands,
 	svc_statscommands,
 	svc_configdata,
-	svc_configclient
+	svc_configclient,
+	svc_acdata
 };
 
 
@@ -90,7 +87,10 @@ enum clc_ops_e {
 	clc_empty1,
 	clc_empty2,
 	clc_steamcommands,
-	clc_statscommands
+	clc_statscommands,
+	clc_empty3,
+	clc_empty4,
+	clc_acdata
 };
 
 #endif
